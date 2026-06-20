@@ -1,4 +1,5 @@
 import { checkAndExpireBookings } from './services/bookings';
+import { checkAndExpireConfirmations } from './services/waitlist';
 
 let schedulerTimer: NodeJS.Timeout | null = null;
 
@@ -8,19 +9,32 @@ export function startScheduler() {
   }
   schedulerTimer = setInterval(() => {
     try {
-      const count = checkAndExpireBookings();
-      if (count > 0) {
-        console.log(`[Scheduler] Expired ${count} bookings`);
+      const bookingCount = checkAndExpireBookings();
+      if (bookingCount > 0) {
+        console.log(`[Scheduler] Expired ${bookingCount} bookings`);
       }
     } catch (e) {
       console.error('[Scheduler] Error checking expired bookings:', e);
+    }
+    try {
+      const confirmCount = checkAndExpireConfirmations();
+      if (confirmCount > 0) {
+        console.log(`[Scheduler] Expired ${confirmCount} waitlist confirmations`);
+      }
+    } catch (e) {
+      console.error('[Scheduler] Error checking expired confirmations:', e);
     }
   }, 60 * 1000);
 
   try {
     checkAndExpireBookings();
   } catch (e) {
-    console.error('[Scheduler] Initial check failed:', e);
+    console.error('[Scheduler] Initial booking check failed:', e);
+  }
+  try {
+    checkAndExpireConfirmations();
+  } catch (e) {
+    console.error('[Scheduler] Initial confirmation check failed:', e);
   }
 }
 

@@ -8,6 +8,10 @@ const api = {
     delete: (id: string) => ipcRenderer.invoke('rooms:delete', id),
     getSchedule: (startDate: string, endDate: string) =>
       ipcRenderer.invoke('rooms:schedule', startDate, endDate),
+    getDaySchedule: (date: string) => ipcRenderer.invoke('rooms:daySchedule', date),
+    getWeekSchedule: (weekStart: string) => ipcRenderer.invoke('rooms:weekSchedule', weekStart),
+    getDailySlots: (roomId: string, startDate: string, endDate: string) =>
+      ipcRenderer.invoke('rooms:dailySlots', roomId, startDate, endDate),
   },
   families: {
     list: () => ipcRenderer.invoke('families:list'),
@@ -18,6 +22,11 @@ const api = {
       ipcRenderer.invoke('families:adjustQuota', familyId, amount, reason),
     getQuotaHistory: (familyId: string) =>
       ipcRenderer.invoke('families:getQuotaHistory', familyId),
+    listPackages: () => ipcRenderer.invoke('families:listPackages'),
+    purchasePackage: (familyId: string, packageId: string) =>
+      ipcRenderer.invoke('families:purchasePackage', familyId, packageId),
+    getMonthlyBill: (familyId: string, yearMonth: string) =>
+      ipcRenderer.invoke('families:getMonthlyBill', familyId, yearMonth),
   },
   pets: {
     listByFamily: (familyId: string) => ipcRenderer.invoke('pets:listByFamily', familyId),
@@ -38,13 +47,18 @@ const api = {
     add: (data: any) => ipcRenderer.invoke('waitlist:add', data),
     remove: (waitlistId: string, reason?: string) =>
       ipcRenderer.invoke('waitlist:remove', waitlistId, reason),
+    listConfirmations: () => ipcRenderer.invoke('waitlist:listConfirmations'),
+    confirm: (confirmationId: string) => ipcRenderer.invoke('waitlist:confirm', confirmationId),
+    decline: (confirmationId: string) => ipcRenderer.invoke('waitlist:decline', confirmationId),
   },
   feedings: {
     listByDate: (date: string) => ipcRenderer.invoke('feedings:listByDate', date),
-    checkin: (bookingId: string, date: string, timeSlot: string, operator: string, note?: string) =>
-      ipcRenderer.invoke('feedings:checkin', bookingId, date, timeSlot, operator, note),
+    checkin: (bookingId: string, date: string, timeSlot: string, operator: string, note?: string, isAnomaly?: boolean, anomalyType?: string) =>
+      ipcRenderer.invoke('feedings:checkin', bookingId, date, timeSlot, operator, note, isAnomaly, anomalyType),
     stats: (startDate: string, endDate: string) =>
       ipcRenderer.invoke('feedings:stats', startDate, endDate),
+    anomalies: (startDate: string, endDate: string) =>
+      ipcRenderer.invoke('feedings:anomalies', startDate, endDate),
   },
   notifications: {
     list: () => ipcRenderer.invoke('notifications:list'),

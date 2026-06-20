@@ -1,14 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { Card, DatePicker, Table, Button, Tag, Modal, Form, Input, message, Space, Tooltip } from 'antd';
-import { CheckCircleOutlined, CheckCircleFilled } from '@ant-design/icons';
+import { Card, DatePicker, Table, Button, Tag, Modal, Form, Input, message, Space, Tooltip, Checkbox, Select, Alert } from 'antd';
+import { CheckCircleOutlined, CheckCircleFilled, WarningOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import type { FeedingRow } from '../types';
+import { ANOMALY_TYPE_LABELS } from '../types';
 
 const TIME_SLOT_LABELS: Record<string, string> = {
   morning: '早餐',
   noon: '午餐',
   evening: '晚餐',
 };
+
+const ANOMALY_OPTIONS = Object.entries(ANOMALY_TYPE_LABELS).map(([value, label]) => ({
+  value,
+  label,
+}));
 
 function FeedingPage() {
   const [date, setDate] = useState(dayjs().format('YYYY-MM-DD'));
@@ -19,6 +25,8 @@ function FeedingPage() {
     petName: string;
     slot: string;
   } | null>(null);
+  const [isAnomaly, setIsAnomaly] = useState(false);
+  const [anomalyType, setAnomalyType] = useState<string | undefined>(undefined);
   const [form] = Form.useForm();
   const operator = '管理员';
 
@@ -42,6 +50,8 @@ function FeedingPage() {
       petName: row.pet_name,
       slot: slot.key,
     });
+    setIsAnomaly(false);
+    setAnomalyType(undefined);
     form.resetFields();
     setModalOpen(true);
   };
@@ -50,12 +60,18 @@ function FeedingPage() {
     if (!currentSlot) return;
     try {
       const values = await form.validateFields();
+      if (isAnomaly && !anomalyType) {
+        message.error('请选择异常类型');
+        return;
+      }
       await window.api.feedings.checkin(
         currentSlot.bookingId,
         date,
         currentSlot.slot,
         operator,
-        values.note
+        values.note,
+        isAnomaly,
+        isAnomaly ? anomalyType : undefined
       );
       message.success(`${currentSlot.petName} 的${TIME_SLOT_LABELS[currentSlot.slot]}打卡成功`);
       setModalOpen(false);
@@ -71,6 +87,19 @@ function FeedingPage() {
     0
   );
 
+  const anomalyRecords: { petName: string; anomalyType: string }[] = [];
+  data.forEach((row) => {
+    row.slots.forEach((slot) => {
+      if (slot.done && slot.record?.is_anomaly === 1) {
+        anomalyRecords.push({
+          petName: row.pet_name,
+          anomalyType: slot.record.anomaly_type,
+        });
+      }
+    });
+  });
+  const anomalyCount = anomalyRecords.length;
+
   const columns = [
     { title: '宠物', dataIndex: 'pet_name', key: 'pet_name', width: 120 },
     { title: '家庭', dataIndex: 'family_name', key: 'family_name', width: 140 },
@@ -78,18 +107,24 @@ function FeedingPage() {
     ...(['morning', 'noon', 'evening'] as const).map((slotKey) => ({
       title: TIME_SLOT_LABELS[slotKey],
       key: slotKey,
-      width: 140,
+      width: 160,
       render: (_: any, record: FeedingRow) => {
         const slot = record.slots.find((s) => s.key === slotKey);
         if (!slot) return null;
         if (slot.done) {
+          const isAnomalyRecord = slot.record?.is_anomaly === 1;
           return (
-            <Tooltip title={slot.record?.note || `操作人: ${slot.record?.operator}`}>
-              <Tag color="green" icon={<CheckCircleFilled />}>
-                已打卡
-                <div style={{ fontSize: 11, color: '#8c8c8c' }}>{slot.record?.created_at?.slice(11, 16)}</div>
-              </Tag>
-            </Tooltip>
+            <Space direction="vertical" size={2}>
+              <Tooltip title={slot.record?.note || `操作人: ${slot.record?.operator}`}>
+                <Tag color={isAnomalyRecord ? 'volcano' : 'green'} icon={<CheckCircleFilled />}>
+                  {isAnomalyRecord ? '异常' : '已打卡'}
+                  <div style={{ fontSize: 11, color: '#8c8c8c' }}>{slot.record?.created_at?.slice(11, 16)}</div>
+                </Tag>
+              </Tooltip>
+              {isAnomalyRecord && slot.record?.anomaly_type && (
+                <Tag color="red">{ANOMALY_TYPE_LABELS[slot.record.anomaly_type] || slot.record.anomaly_type}</Tag>
+              )}
+            </Space>
           );
         }
         return (
@@ -122,6 +157,26 @@ function FeedingPage() {
         </Space>
       </div>
 
+      {anomalyCount > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          icon={<WarningOutlined />}
+          style={{ marginBottom: 16 }}
+          message={`今日异常上报 ${anomalyCount} 条`}
+          description={
+            <div>
+              {anomalyRecords.map((r, i) => (
+                <span key={i}>
+                  {i > 0 && '、'}
+                  {r.petName}（{ANOMALY_TYPE_LABELS[r.anomalyType] || r.anomalyType}）
+                </span>
+              ))}
+            </div>
+          }
+        />
+      )}
+
       <Card>
         <Table
           rowKey="booking_id"
@@ -152,6 +207,30 @@ function FeedingPage() {
           <Form.Item label="备注(食量/状态等)" name="note">
             <Input.TextArea rows={3} placeholder="例如：食欲良好，进食正常" />
           </Form.Item>
+          <Form.Item>
+            <Checkbox
+              checked={isAnomaly}
+              onChange={(e) => {
+                setIsAnomaly(e.target.checked);
+                if (!e.target.checked) {
+                  setAnomalyType(undefined);
+                }
+              }}
+            >
+              异常上报
+            </Checkbox>
+          </Form.Item>
+          {isAnomaly && (
+            <Form.Item label="异常类型" required>
+              <Select
+                value={anomalyType}
+                onChange={(val) => setAnomalyType(val)}
+                placeholder="请选择异常类型"
+                options={ANOMALY_OPTIONS}
+                style={{ width: '100%' }}
+              />
+            </Form.Item>
+          )}
         </Form>
       </Modal>
     </div>

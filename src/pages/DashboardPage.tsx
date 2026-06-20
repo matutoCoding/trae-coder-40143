@@ -1,8 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { Row, Col, Card, Table, Tag, Button, Space } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { Row, Col, Card, Table, Tag, Button, Space, List, Alert, Statistic } from 'antd';
+import { PlusOutlined, WarningOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { BOOKING_STATUS_LABELS, BOOKING_STATUS_COLORS, type Booking } from '../types';
+import { BOOKING_STATUS_LABELS, BOOKING_STATUS_COLORS, ANOMALY_TYPE_LABELS, type Booking } from '../types';
+
+const TIME_SLOT_LABELS: Record<string, string> = {
+  morning: '早餐',
+  noon: '午餐',
+  evening: '晚餐',
+};
+
+interface AnomalyRecord {
+  id: string;
+  pet_name: string;
+  family_name: string;
+  room_name: string;
+  anomaly_type: string;
+  time_slot: string;
+  note: string | null;
+  date: string;
+  created_at: string;
+}
 
 interface Props {
   onNavigate: (key: string) => void;
@@ -17,6 +35,7 @@ function DashboardPage({ onNavigate }: Props) {
     checkedInToday: 0,
   });
   const [recentBookings, setRecentBookings] = useState<Booking[]>([]);
+  const [anomalies, setAnomalies] = useState<AnomalyRecord[]>([]);
 
   const loadData = async () => {
     try {
@@ -36,7 +55,7 @@ function DashboardPage({ onNavigate }: Props) {
       const waitlist = await window.api.waitlist.list();
 
       setStats({
-        totalRooms: rooms.filter((r) => r.status === 'active').length,
+        totalRooms: rooms.filter((r: any) => r.status === 'active').length,
         occupiedRooms: occupied,
         activeBookings: active,
         waitlistCount: waitlist.length,
@@ -44,6 +63,9 @@ function DashboardPage({ onNavigate }: Props) {
       });
 
       setRecentBookings(bookings.slice(0, 8));
+
+      const anomalyList = await window.api.feedings.anomalies(today, today);
+      setAnomalies(anomalyList);
     } catch (e) {
       console.error(e);
     }
@@ -52,6 +74,8 @@ function DashboardPage({ onNavigate }: Props) {
   useEffect(() => {
     loadData();
   }, []);
+
+  const anomalyCount = anomalies.length;
 
   const statCards = [
     {
@@ -81,6 +105,13 @@ function DashboardPage({ onNavigate }: Props) {
       icon: '⏳',
       color: '#722ed1',
       onClick: () => onNavigate('waitlist'),
+    },
+    {
+      label: '今日异常',
+      value: anomalyCount,
+      icon: '⚠️',
+      color: anomalyCount > 0 ? '#ff4d4f' : '#52c41a',
+      onClick: () => onNavigate('feeding'),
     },
   ];
 
@@ -134,7 +165,7 @@ function DashboardPage({ onNavigate }: Props) {
 
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         {statCards.map((card) => (
-          <Col xs={12} sm={6} key={card.label}>
+          <Col xs={12} sm={6} lg={4} key={card.label}>
             <Card className="stat-card" hoverable onClick={card.onClick} style={{ cursor: 'pointer' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <span style={{ fontSize: 36 }}>{card.icon}</span>
@@ -149,6 +180,47 @@ function DashboardPage({ onNavigate }: Props) {
           </Col>
         ))}
       </Row>
+
+      <Card
+        title={
+          <span>
+            <WarningOutlined style={{ color: '#fa541c', marginRight: 8 }} />
+            喂养异常提醒
+          </span>
+        }
+        style={{ marginBottom: 24 }}
+        extra={anomalyCount > 0 && <Tag color="red">{anomalyCount} 条异常</Tag>}
+      >
+        {anomalyCount === 0 ? (
+          <Alert type="success" showIcon message="今日无异常" description="今日所有喂养记录正常，无异常上报。" />
+        ) : (
+          <List
+            dataSource={anomalies}
+            renderItem={(item) => (
+              <List.Item>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
+                  <WarningOutlined style={{ color: '#fa541c', fontSize: 18 }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 500, marginBottom: 4 }}>
+                      {item.pet_name}
+                      <Tag color="orange" style={{ marginLeft: 8 }}>{item.family_name}</Tag>
+                      <Tag color="blue">{item.room_name}</Tag>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <Tag color="red">{ANOMALY_TYPE_LABELS[item.anomaly_type] || item.anomaly_type}</Tag>
+                      <Tag color="volcano">{TIME_SLOT_LABELS[item.time_slot] || item.time_slot}</Tag>
+                      {item.note && <span style={{ color: '#8c8c8c', fontSize: 12 }}>{item.note}</span>}
+                    </div>
+                  </div>
+                  <span style={{ color: '#8c8c8c', fontSize: 12 }}>
+                    {item.created_at?.slice(11, 16)}
+                  </span>
+                </div>
+              </List.Item>
+            )}
+          />
+        )}
+      </Card>
 
       <Card title="最近预订">
         <Table

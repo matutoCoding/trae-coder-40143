@@ -24,6 +24,7 @@ export function initDatabase() {
   db.pragma('foreign_keys = ON');
 
   initSchema();
+  runMigrations();
   seedData();
 }
 
@@ -62,8 +63,19 @@ function initSchema() {
       reason TEXT,
       operator TEXT,
       related_booking_id TEXT,
+      package_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (family_id) REFERENCES families(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS quota_packages (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      days INTEGER NOT NULL,
+      price REAL NOT NULL,
+      description TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS pets (
@@ -116,6 +128,24 @@ function initSchema() {
       FOREIGN KEY (pet_id) REFERENCES pets(id)
     );
 
+    CREATE TABLE IF NOT EXISTS waitlist_confirmations (
+      id TEXT PRIMARY KEY,
+      waitlist_id TEXT NOT NULL,
+      family_id TEXT NOT NULL,
+      pet_id TEXT NOT NULL,
+      room_id TEXT NOT NULL,
+      start_date TEXT NOT NULL,
+      end_date TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      confirm_deadline TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      confirmed_at TEXT,
+      FOREIGN KEY (waitlist_id) REFERENCES waitlist(id),
+      FOREIGN KEY (family_id) REFERENCES families(id),
+      FOREIGN KEY (pet_id) REFERENCES pets(id),
+      FOREIGN KEY (room_id) REFERENCES rooms(id)
+    );
+
     CREATE TABLE IF NOT EXISTS feeding_records (
       id TEXT PRIMARY KEY,
       booking_id TEXT NOT NULL,
@@ -124,6 +154,8 @@ function initSchema() {
       time_slot TEXT NOT NULL,
       operator TEXT NOT NULL,
       note TEXT,
+      is_anomaly INTEGER NOT NULL DEFAULT 0,
+      anomaly_type TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (booking_id) REFERENCES bookings(id),
       FOREIGN KEY (pet_id) REFERENCES pets(id),
@@ -146,9 +178,29 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_waitlist_room_type ON waitlist(room_type, start_date, end_date);
     CREATE INDEX IF NOT EXISTS idx_waitlist_status ON waitlist(status);
     CREATE INDEX IF NOT EXISTS idx_feeding_date ON feeding_records(date);
+    CREATE INDEX IF NOT EXISTS idx_feeding_anomaly ON feeding_records(is_anomaly);
     CREATE INDEX IF NOT EXISTS idx_quota_family ON quota_transactions(family_id);
     CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(is_read);
+    CREATE INDEX IF NOT EXISTS idx_wl_confirm_status ON waitlist_confirmations(status);
+    CREATE INDEX IF NOT EXISTS idx_wl_confirm_deadline ON waitlist_confirmations(confirm_deadline);
   `);
+}
+
+function runMigrations() {
+  if (!db) return;
+
+  const cols = db.prepare("PRAGMA table_info(feeding_records)").all() as any[];
+  if (!cols.find((c) => c.name === 'is_anomaly')) {
+    db.exec('ALTER TABLE feeding_records ADD COLUMN is_anomaly INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!cols.find((c) => c.name === 'anomaly_type')) {
+    db.exec('ALTER TABLE feeding_records ADD COLUMN anomaly_type TEXT');
+  }
+
+  const qCols = db.prepare("PRAGMA table_info(quota_transactions)").all() as any[];
+  if (!qCols.find((c) => c.name === 'package_id')) {
+    db.exec('ALTER TABLE quota_transactions ADD COLUMN package_id TEXT');
+  }
 }
 
 function seedData() {
@@ -202,5 +254,23 @@ function seedData() {
       }
     });
     petTx(pets);
+  }
+
+  const pkgCount = db.prepare('SELECT COUNT(*) as cnt FROM quota_packages').get() as any;
+  if (pkgCount.cnt === 0) {
+    const packages = [
+      { id: 'pkg1', name: '体验套餐', days: 5, price: 400, description: '5天寄养额度' },
+      { id: 'pkg2', name: '月度套餐', days: 30, price: 2100, description: '30天寄养额度，省300元' },
+      { id: 'pkg3', name: '季度套餐', days: 90, price: 5400, description: '90天寄养额度，省1800元' },
+    ];
+    const pkgStmt = db.prepare(
+      'INSERT INTO quota_packages (id, name, days, price, description) VALUES (?, ?, ?, ?, ?)'
+    );
+    const pkgTx = db.transaction((data: any[]) => {
+      for (const p of data) {
+        pkgStmt.run(p.id, p.name, p.days, p.price, p.description);
+      }
+    });
+    pkgTx(packages);
   }
 }

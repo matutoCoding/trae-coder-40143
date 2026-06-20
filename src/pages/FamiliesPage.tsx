@@ -18,9 +18,22 @@ import {
   List,
   Divider,
   Select,
+  Statistic,
+  DatePicker,
 } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, PlusCircleOutlined, MinusCircleOutlined } from '@ant-design/icons';
-import type { Family, Pet, QuotaInfo, QuotaTransaction } from '../types';
+import {
+  PlusOutlined,
+  EditOutlined,
+  DeleteOutlined,
+  PlusCircleOutlined,
+  MinusCircleOutlined,
+  ShoppingCartOutlined,
+  FileTextOutlined,
+  DownloadOutlined,
+} from '@ant-design/icons';
+import dayjs from 'dayjs';
+import type { Family, Pet, QuotaInfo, QuotaTransaction, QuotaPackage, MonthlyBill } from '../types';
+import { BOOKING_STATUS_LABELS, BOOKING_STATUS_COLORS } from '../types';
 
 function FamiliesPage() {
   const [families, setFamilies] = useState<Family[]>([]);
@@ -38,6 +51,12 @@ function FamiliesPage() {
   const [quotaModalOpen, setQuotaModalOpen] = useState(false);
   const [quotaInfo, setQuotaInfo] = useState<QuotaInfo | null>(null);
   const [quotaHistory, setQuotaHistory] = useState<QuotaTransaction[]>([]);
+  const [packages, setPackages] = useState<QuotaPackage[]>([]);
+
+  const [billModalOpen, setBillModalOpen] = useState(false);
+  const [billMonth, setBillMonth] = useState(dayjs());
+  const [billData, setBillData] = useState<MonthlyBill | null>(null);
+  const [billLoading, setBillLoading] = useState(false);
 
   const loadFamilies = async () => {
     try {
@@ -152,12 +171,14 @@ function FamiliesPage() {
   const handleViewQuota = async (f: Family) => {
     setSelectedFamily(f);
     try {
-      const [info, history] = await Promise.all([
+      const [info, history, pkgList] = await Promise.all([
         window.api.families.getQuota(f.id),
         window.api.families.getQuotaHistory(f.id),
+        window.api.families.listPackages(),
       ]);
       setQuotaInfo(info);
       setQuotaHistory(history);
+      setPackages(pkgList);
       setQuotaModalOpen(true);
     } catch (e) {
       console.error(e);
@@ -181,6 +202,146 @@ function FamiliesPage() {
     }
   };
 
+  const handlePurchasePackage = async (packageId: string) => {
+    if (!selectedFamily) return;
+    try {
+      await window.api.families.purchasePackage(selectedFamily.id, packageId);
+      message.success('购买成功');
+      const [info, history] = await Promise.all([
+        window.api.families.getQuota(selectedFamily.id),
+        window.api.families.getQuotaHistory(selectedFamily.id),
+      ]);
+      setQuotaInfo(info);
+      setQuotaHistory(history);
+      loadFamilies();
+    } catch (e: any) {
+      message.error(e.message || '购买失败');
+    }
+  };
+
+  const handleViewBill = (f: Family) => {
+    setSelectedFamily(f);
+    setBillMonth(dayjs());
+    setBillData(null);
+    setBillModalOpen(true);
+  };
+
+  const loadBillData = async (familyId: string, month: dayjs.Dayjs) => {
+    setBillLoading(true);
+    try {
+      const data = await window.api.families.getMonthlyBill(familyId, month.format('YYYY-MM'));
+      setBillData(data);
+    } catch (e: any) {
+      message.error(e.message || '获取账单失败');
+    } finally {
+      setBillLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (billModalOpen && selectedFamily) {
+      loadBillData(selectedFamily.id, billMonth);
+    }
+  }, [billModalOpen, billMonth]);
+
+  const handleExportBill = () => {
+    if (!billData || !selectedFamily) return;
+    const monthStr = billMonth.format('YYYY-MM');
+    const lines: string[] = [];
+    lines.push(`家庭,${selectedFamily.name}`);
+    lines.push(`账单周期,${monthStr}`);
+    lines.push('');
+    lines.push('额度概要');
+    lines.push(`总额度,${billData.quota_pool} 天`);
+    lines.push(`已使用,${billData.used_quota} 天`);
+    lines.push(`可用余额,${billData.available_quota} 天`);
+    lines.push('');
+    lines.push('购买统计');
+    lines.push(`购买天数,${billData.total_purchased_days} 天`);
+    lines.push(`购买金额,¥${billData.total_purchased_amount}`);
+    lines.push(`活跃预订,${billData.active_bookings}`);
+    lines.push(`取消预订,${billData.cancelled_bookings}`);
+    lines.push('');
+    lines.push('交易记录');
+    lines.push('日期,变动,原因,余额');
+    billData.transactions.forEach((t) => {
+      lines.push(`${dayjs(t.created_at).format('YYYY-MM-DD HH:mm')},${t.change_amount > 0 ? '+' : ''}${t.change_amount} 天,${t.reason || ''},${t.balance_after} 天`);
+    });
+    lines.push('');
+    lines.push('预订记录');
+    lines.push('宠物,房间,日期,状态,金额');
+    billData.bookings.forEach((b: any) => {
+      lines.push(`${b.pet_name || ''},${b.room_name || ''},${b.start_date} ~ ${b.end_date},${BOOKING_STATUS_LABELS[b.status as keyof typeof BOOKING_STATUS_LABELS] || b.status},¥${b.total_amount}`);
+    });
+    const csvContent = '\uFEFF' + lines.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${selectedFamily.name}_${monthStr}_账单.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    message.success('导出成功');
+  };
+
+  const transactionColumns = [
+    {
+      title: '日期',
+      dataIndex: 'created_at',
+      key: 'created_at',
+      width: 160,
+      render: (v: string) => dayjs(v).format('YYYY-MM-DD HH:mm'),
+    },
+    {
+      title: '变动',
+      dataIndex: 'change_amount',
+      key: 'change_amount',
+      width: 100,
+      render: (v: number) => (
+        <span style={{ color: v > 0 ? '#52c41a' : '#ff4d4f', fontWeight: 600 }}>
+          {v > 0 ? '+' : ''}{v} 天
+        </span>
+      ),
+    },
+    { title: '原因', dataIndex: 'reason', key: 'reason', ellipsis: true },
+    {
+      title: '余额',
+      dataIndex: 'balance_after',
+      key: 'balance_after',
+      width: 100,
+      render: (v: number) => `${v} 天`,
+    },
+  ];
+
+  const bookingColumns = [
+    { title: '宠物', dataIndex: 'pet_name', key: 'pet_name', width: 100 },
+    { title: '房间', dataIndex: 'room_name', key: 'room_name', width: 100 },
+    {
+      title: '日期',
+      key: 'dates',
+      width: 180,
+      render: (_: any, r: any) => `${r.start_date} ~ ${r.end_date}`,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 90,
+      render: (v: string) => (
+        <Tag color={BOOKING_STATUS_COLORS[v as keyof typeof BOOKING_STATUS_COLORS] || 'default'}>
+          {BOOKING_STATUS_LABELS[v as keyof typeof BOOKING_STATUS_LABELS] || v}
+        </Tag>
+      ),
+    },
+    {
+      title: '金额',
+      dataIndex: 'total_amount',
+      key: 'total_amount',
+      width: 90,
+      render: (v: number) => `¥${v}`,
+    },
+  ];
+
   const columns = [
     { title: '家庭名称', dataIndex: 'name', key: 'name' },
     { title: '联系人', dataIndex: 'contact_person', key: 'contact_person', width: 100 },
@@ -196,11 +357,14 @@ function FamiliesPage() {
     {
       title: '操作',
       key: 'action',
-      width: 260,
+      width: 320,
       render: (_: any, record: Family) => (
         <Space>
           <Button size="small" onClick={() => handleViewPets(record)}>宠物</Button>
           <Button size="small" type="primary" onClick={() => handleViewQuota(record)}>额度</Button>
+          <Button size="small" icon={<FileTextOutlined />} onClick={() => handleViewBill(record)}>
+            月度账单
+          </Button>
           <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)}>编辑</Button>
         </Space>
       ),
@@ -332,7 +496,7 @@ function FamiliesPage() {
         open={quotaModalOpen}
         onCancel={() => setQuotaModalOpen(false)}
         footer={<Button onClick={() => setQuotaModalOpen(false)}>关闭</Button>}
-        width={650}
+        width={700}
       >
         {quotaInfo && (
           <Card size="small" style={{ marginBottom: 16 }}>
@@ -371,7 +535,46 @@ function FamiliesPage() {
             </Row>
           </Card>
         )}
-        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>额度变动记录</div>
+
+        <Divider orientation="left" style={{ fontSize: 14 }}>
+          <ShoppingCartOutlined /> 套餐购买
+        </Divider>
+        {packages.length === 0 ? (
+          <div style={{ color: '#8c8c8c', textAlign: 'center', padding: '12px 0' }}>暂无可购套餐</div>
+        ) : (
+          <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
+            {packages.map((pkg) => (
+              <Col span={12} key={pkg.id}>
+                <Card size="small" hoverable>
+                  <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{pkg.name}</div>
+                  <div style={{ color: '#8c8c8c', fontSize: 13, marginBottom: 8 }}>
+                    {pkg.description || `${pkg.days} 天额度`}
+                  </div>
+                  <Row justify="space-between" align="middle">
+                    <Col>
+                      <Space split={<Divider type="vertical" />}>
+                        <Tag color="blue">{pkg.days} 天</Tag>
+                        <span style={{ color: '#ff4d4f', fontWeight: 600, fontSize: 16 }}>¥{pkg.price}</span>
+                      </Space>
+                    </Col>
+                    <Col>
+                      <Button
+                        type="primary"
+                        size="small"
+                        icon={<ShoppingCartOutlined />}
+                        onClick={() => handlePurchasePackage(pkg.id)}
+                      >
+                        购买
+                      </Button>
+                    </Col>
+                  </Row>
+                </Card>
+              </Col>
+            ))}
+          </Row>
+        )}
+
+        <Divider orientation="left" style={{ fontSize: 14 }}>额度变动记录</Divider>
         <List
           size="small"
           dataSource={quotaHistory}
@@ -389,6 +592,80 @@ function FamiliesPage() {
             </List.Item>
           )}
         />
+      </Modal>
+
+      <Modal
+        title={`${selectedFamily?.name} - 月度账单`}
+        open={billModalOpen}
+        onCancel={() => setBillModalOpen(false)}
+        footer={[
+          <Button key="export" icon={<DownloadOutlined />} onClick={handleExportBill} disabled={!billData}>
+            导出账单
+          </Button>,
+          <Button key="close" onClick={() => setBillModalOpen(false)}>关闭</Button>,
+        ]}
+        width={800}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <DatePicker
+            picker="month"
+            value={billMonth}
+            onChange={(v) => v && setBillMonth(v)}
+            allowClear={false}
+          />
+        </div>
+
+        {billLoading && <div style={{ textAlign: 'center', padding: 24 }}>加载中...</div>}
+
+        {billData && !billLoading && (
+          <>
+            <Row gutter={16} style={{ marginBottom: 16 }}>
+              <Col span={8}>
+                <Card size="small">
+                  <Statistic title="总额度" value={billData.quota_pool} suffix="天" valueStyle={{ color: '#1890ff' }} />
+                </Card>
+              </Col>
+              <Col span={8}>
+                <Card size="small">
+                  <Statistic title="已使用" value={billData.used_quota} suffix="天" valueStyle={{ color: '#faad14' }} />
+                </Card>
+              </Col>
+              <Col span={8}>
+                <Card size="small">
+                  <Statistic title="可用余额" value={billData.available_quota} suffix="天" valueStyle={{ color: '#52c41a' }} />
+                </Card>
+              </Col>
+            </Row>
+
+            <Descriptions bordered size="small" column={2} style={{ marginBottom: 16 }}>
+              <Descriptions.Item label="购买天数">{billData.total_purchased_days} 天</Descriptions.Item>
+              <Descriptions.Item label="购买金额">¥{billData.total_purchased_amount}</Descriptions.Item>
+              <Descriptions.Item label="活跃预订">{billData.active_bookings}</Descriptions.Item>
+              <Descriptions.Item label="取消预订">{billData.cancelled_bookings}</Descriptions.Item>
+            </Descriptions>
+
+            <Divider orientation="left" style={{ fontSize: 14 }}>交易记录</Divider>
+            <Table
+              rowKey="id"
+              size="small"
+              columns={transactionColumns}
+              dataSource={billData.transactions}
+              pagination={false}
+              locale={{ emptyText: '暂无交易记录' }}
+              style={{ marginBottom: 16 }}
+            />
+
+            <Divider orientation="left" style={{ fontSize: 14 }}>预订记录</Divider>
+            <Table
+              rowKey="id"
+              size="small"
+              columns={bookingColumns}
+              dataSource={billData.bookings}
+              pagination={false}
+              locale={{ emptyText: '暂无预订记录' }}
+            />
+          </>
+        )}
       </Modal>
     </div>
   );

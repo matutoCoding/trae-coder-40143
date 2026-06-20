@@ -80,6 +80,25 @@ export interface WaitlistEntry {
   phone?: string;
 }
 
+export interface WaitlistConfirmation {
+  id: string;
+  waitlist_id: string;
+  family_id: string;
+  pet_id: string;
+  room_id: string;
+  start_date: string;
+  end_date: string;
+  status: 'pending' | 'confirmed' | 'declined' | 'expired';
+  confirm_deadline: string;
+  created_at: string;
+  confirmed_at: string | null;
+  pet_name?: string;
+  family_name?: string;
+  room_name?: string;
+  contact_person?: string;
+  phone?: string;
+}
+
 export interface QuotaInfo {
   quota_pool: number;
   used_quota: number;
@@ -94,6 +113,17 @@ export interface QuotaTransaction {
   reason: string | null;
   operator: string | null;
   related_booking_id: string | null;
+  package_id: string | null;
+  created_at: string;
+}
+
+export interface QuotaPackage {
+  id: string;
+  name: string;
+  days: number;
+  price: number;
+  description: string | null;
+  is_active: number;
   created_at: string;
 }
 
@@ -123,6 +153,47 @@ export interface Notification {
   created_at: string;
 }
 
+export interface DayScheduleRoom {
+  room_id: string;
+  room_name: string;
+  room_type: string;
+  capacity: number;
+  price_per_day: number;
+  occupied: number;
+  available: number;
+  bookings: any[];
+}
+
+export interface WeekScheduleRoom {
+  room_id: string;
+  room_name: string;
+  room_type: string;
+  capacity: number;
+  price_per_day: number;
+  days: Record<string, { date: string; occupied: number; available: number; bookings: any[] }>;
+}
+
+export interface DailySlots {
+  room_id: string;
+  room_name: string;
+  capacity: number;
+  days: { date: string; occupied: number; available: number; isFull: boolean }[];
+}
+
+export interface MonthlyBill {
+  family_id: string;
+  period: string;
+  quota_pool: number;
+  used_quota: number;
+  available_quota: number;
+  total_purchased_days: number;
+  total_purchased_amount: number;
+  active_bookings: number;
+  cancelled_bookings: number;
+  transactions: QuotaTransaction[];
+  bookings: any[];
+}
+
 export const ROOM_TYPE_LABELS: Record<string, string> = {
   luxury: '豪华间',
   standard: '标准间',
@@ -144,6 +215,14 @@ export const BOOKING_STATUS_COLORS: Record<string, string> = {
   checked_out: 'default',
   cancelled: 'red',
   expired: 'gray',
+};
+
+export const ANOMALY_TYPE_LABELS: Record<string, string> = {
+  food_refusal: '拒食',
+  vomiting: '呕吐',
+  lethargy: '精神差',
+  diarrhea: '腹泻',
+  other: '其他异常',
 };
 
 export const SPECIES_LABELS: Record<string, string> = {

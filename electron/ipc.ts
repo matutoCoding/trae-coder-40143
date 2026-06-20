@@ -15,6 +15,11 @@ export function initIpcHandlers() {
   ipcMain.handle('rooms:schedule', (_e, startDate, endDate) =>
     roomsService.getRoomSchedule(startDate, endDate)
   );
+  ipcMain.handle('rooms:daySchedule', (_e, date) => roomsService.getDaySchedule(date));
+  ipcMain.handle('rooms:weekSchedule', (_e, weekStart) => roomsService.getWeekSchedule(weekStart));
+  ipcMain.handle('rooms:dailySlots', (_e, roomId, startDate, endDate) =>
+    roomsService.getRoomDailySlots(roomId, startDate, endDate)
+  );
 
   ipcMain.handle('families:list', () => familiesService.listFamilies());
   ipcMain.handle('families:create', (_e, data) => familiesService.createFamily(data));
@@ -25,6 +30,13 @@ export function initIpcHandlers() {
   );
   ipcMain.handle('families:getQuotaHistory', (_e, familyId) =>
     familiesService.getQuotaHistory(familyId)
+  );
+  ipcMain.handle('families:listPackages', () => familiesService.listPackages());
+  ipcMain.handle('families:purchasePackage', (_e, familyId, packageId) =>
+    familiesService.purchasePackage(familyId, packageId)
+  );
+  ipcMain.handle('families:getMonthlyBill', (_e, familyId, yearMonth) =>
+    familiesService.getMonthlyBill(familyId, yearMonth)
   );
 
   ipcMain.handle('pets:listByFamily', (_e, familyId) => petsService.listPetsByFamily(familyId));
@@ -45,13 +57,23 @@ export function initIpcHandlers() {
   ipcMain.handle('waitlist:remove', (_e, waitlistId, reason) =>
     waitlistService.removeFromWaitlist(waitlistId, reason)
   );
+  ipcMain.handle('waitlist:listConfirmations', () => waitlistService.listConfirmations());
+  ipcMain.handle('waitlist:confirm', (_e, confirmationId) =>
+    waitlistService.confirmWaitlist(confirmationId)
+  );
+  ipcMain.handle('waitlist:decline', (_e, confirmationId) =>
+    waitlistService.declineWaitlist(confirmationId)
+  );
 
   ipcMain.handle('feedings:listByDate', (_e, date) => feedingsService.listFeedingByDate(date));
-  ipcMain.handle('feedings:checkin', (_e, bookingId, date, timeSlot, operator, note) =>
-    feedingsService.checkinFeeding(bookingId, date, timeSlot, operator, note)
+  ipcMain.handle('feedings:checkin', (_e, bookingId, date, timeSlot, operator, note, isAnomaly, anomalyType) =>
+    feedingsService.checkinFeeding(bookingId, date, timeSlot, operator, note, isAnomaly, anomalyType)
   );
   ipcMain.handle('feedings:stats', (_e, startDate, endDate) =>
     feedingsService.getFeedingStats(startDate, endDate)
+  );
+  ipcMain.handle('feedings:anomalies', (_e, startDate, endDate) =>
+    feedingsService.getFeedingAnomalies(startDate, endDate)
   );
 
   ipcMain.handle('notifications:list', () => notificationsService.listNotifications());

@@ -77,6 +77,92 @@ export function getRoomSchedule(startDate: string, endDate: string) {
   });
 }
 
+export function getDaySchedule(date: string) {
+  const db = getDb();
+  const rooms = listRooms().filter((r) => r.status === 'active');
+  const bookings = db
+    .prepare(
+      `SELECT b.id, b.pet_id, b.start_date, b.end_date, b.status, b.deadline,
+              p.name as pet_name, f.name as family_name
+       FROM bookings b
+       JOIN pets p ON b.pet_id = p.id
+       JOIN families f ON b.family_id = f.id
+       WHERE b.room_id = ?
+         AND b.status IN ('pending', 'checked_in')
+         AND b.start_date <= ?
+         AND b.end_date >= ?`
+    );
+
+  return rooms.map((room) => {
+    const roomBookings = bookings.all(room.id, date, date) as any[];
+    const occupied = roomBookings.length;
+    return {
+      room_id: room.id,
+      room_name: room.name,
+      room_type: room.type,
+      capacity: room.capacity,
+      price_per_day: room.price_per_day,
+      occupied,
+      available: Math.max(0, room.capacity - occupied),
+      bookings: roomBookings,
+    };
+  });
+}
+
+export function getWeekSchedule(weekStart: string) {
+  const db = getDb();
+  const rooms = listRooms().filter((r) => r.status === 'active');
+  const start = dayjs(weekStart);
+  const end = start.add(6, 'day');
+  const startDateStr = start.format('YYYY-MM-DD');
+  const endDateStr = end.format('YYYY-MM-DD');
+
+  const allBookings = db
+    .prepare(
+      `SELECT b.id, b.room_id, b.pet_id, b.start_date, b.end_date, b.status, b.deadline,
+              p.name as pet_name, f.name as family_name
+       FROM bookings b
+       JOIN pets p ON b.pet_id = p.id
+       JOIN families f ON b.family_id = f.id
+       WHERE b.status IN ('pending', 'checked_in')
+         AND b.start_date <= ?
+         AND b.end_date >= ?`
+    )
+    .all(endDateStr, startDateStr) as any[];
+
+  const days: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    days.push(start.add(i, 'day').format('YYYY-MM-DD'));
+  }
+
+  return {
+    days,
+    rooms: rooms.map((room) => {
+      const roomBookings = allBookings.filter((b) => b.room_id === room.id);
+      const dayMap: Record<string, { date: string; occupied: number; available: number; bookings: any[] }> = {};
+      for (const d of days) {
+        const dayBookings = roomBookings.filter(
+          (b) => b.start_date <= d && b.end_date >= d
+        );
+        dayMap[d] = {
+          date: d,
+          occupied: dayBookings.length,
+          available: Math.max(0, room.capacity - dayBookings.length),
+          bookings: dayBookings,
+        };
+      }
+      return {
+        room_id: room.id,
+        room_name: room.name,
+        room_type: room.type,
+        capacity: room.capacity,
+        price_per_day: room.price_per_day,
+        days: dayMap,
+      };
+    }),
+  };
+}
+
 export function checkRoomAvailability(roomId: string, startDate: string, endDate: string, excludeBookingId?: string): boolean {
   const db = getDb();
   const room = db.prepare('SELECT capacity FROM rooms WHERE id = ?').get(roomId) as { capacity: number } | undefined;
@@ -111,20 +197,35 @@ export function checkRoomAvailability(roomId: string, startDate: string, endDate
   return true;
 }
 
-export function getRoomAvailableSlots(roomId: string, date: string): number {
+export function getRoomDailySlots(roomId: string, startDate: string, endDate: string) {
   const db = getDb();
-  const room = db.prepare('SELECT capacity FROM rooms WHERE id = ?').get(roomId) as { capacity: number } | undefined;
-  if (!room) return 0;
+  const room = db.prepare('SELECT * FROM rooms WHERE id = ?').get(roomId) as Room | undefined;
+  if (!room) throw new Error('房间不存在');
 
-  const result = db
-    .prepare(
-      `SELECT COUNT(*) as cnt FROM bookings
-       WHERE room_id = ?
-         AND status IN ('pending', 'checked_in')
-         AND start_date <= ?
-         AND end_date >= ?`
-    )
-    .get(roomId, date, date) as any;
+  let sql = `SELECT start_date, end_date FROM bookings
+             WHERE room_id = ?
+               AND status IN ('pending', 'checked_in')
+               AND start_date <= ?
+               AND end_date >= ?`;
+  const params: any[] = [roomId, endDate, startDate];
+  const overlapping = db.prepare(sql).all(...params) as { start_date: string; end_date: string }[];
 
-  return Math.max(0, room.capacity - (result.cnt || 0));
+  const days: { date: string; occupied: number; available: number; isFull: boolean }[] = [];
+  let current = dayjs(startDate);
+  const end = dayjs(endDate);
+  while (current.isBefore(end) || current.isSame(end, 'day')) {
+    const dateStr = current.format('YYYY-MM-DD');
+    const countOnDay = overlapping.filter(
+      (b) => b.start_date <= dateStr && b.end_date >= dateStr
+    ).length;
+    days.push({
+      date: dateStr,
+      occupied: countOnDay,
+      available: Math.max(0, room.capacity - countOnDay),
+      isFull: countOnDay >= room.capacity,
+    });
+    current = current.add(1, 'day');
+  }
+
+  return { room_id: roomId, room_name: room.name, capacity: room.capacity, days };
 }
