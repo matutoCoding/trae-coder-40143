@@ -4,6 +4,7 @@ import dayjs from 'dayjs';
 import { checkRoomAvailability } from './rooms';
 import { getFamilyQuota, recordQuotaChange } from './families';
 import { promoteFromWaitlist } from './waitlist';
+import { createCleaningTask } from './cleanings';
 
 export type BookingStatus = 'pending' | 'checked_in' | 'checked_out' | 'cancelled' | 'expired';
 
@@ -67,6 +68,7 @@ export function createBooking(data: {
   end_date: string;
   notes?: string;
   operator?: string;
+  source?: string;
 }): Booking {
   const db = getDb();
   const alreadyInTx = db.inTransaction;
@@ -89,10 +91,11 @@ export function createBooking(data: {
     const id = uuidv4();
     const deadline = `${data.start_date} 23:59:59`;
     const now = dayjs().format('YYYY-MM-DD HH:mm:ss');
+    const source = data.source || 'normal';
 
     db.prepare(
-      `INSERT INTO bookings (id, family_id, pet_id, room_id, start_date, end_date, status, deadline, total_amount, notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`
+      `INSERT INTO bookings (id, family_id, pet_id, room_id, start_date, end_date, status, deadline, total_amount, source, notes, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`
     ).run(
       id,
       data.family_id,
@@ -102,12 +105,13 @@ export function createBooking(data: {
       data.end_date,
       deadline,
       totalAmount,
+      source,
       data.notes || null,
       now,
       now
     );
 
-    recordQuotaChange(data.family_id, -days, '预订寄养扣减额度', id);
+    recordQuotaChange(data.family_id, -days, source === 'waitlist' ? '候补转正扣减额度' : '预订寄养扣减额度', id, source);
 
     if (!alreadyInTx) {
       db.exec('COMMIT');
@@ -154,8 +158,9 @@ export function checkoutBooking(bookingId: string): Booking {
       bookingId
     );
 
-    recordQuotaChange(booking.family_id, days, '退房释放额度', bookingId);
+    recordQuotaChange(booking.family_id, days, '退房释放额度', bookingId, booking.source || 'normal');
     promoteFromWaitlist(booking.room_id, booking.start_date, booking.end_date);
+    createCleaningTask(booking.room_id, bookingId, now);
 
     return db.prepare('SELECT * FROM bookings WHERE id = ?').get(bookingId) as Booking;
   });
@@ -179,7 +184,7 @@ export function cancelBooking(bookingId: string, reason?: string): Booking {
       bookingId
     );
 
-    recordQuotaChange(booking.family_id, days, reason || '取消预订退还额度', bookingId);
+    recordQuotaChange(booking.family_id, days, reason || '取消预订退还额度', bookingId, booking.source || 'normal');
     promoteFromWaitlist(booking.room_id, booking.start_date, booking.end_date);
 
     return db.prepare('SELECT * FROM bookings WHERE id = ?').get(bookingId) as Booking;
@@ -198,7 +203,7 @@ export function expireBooking(bookingId: string): Booking {
     const now = dayjs().format('YYYY-MM-DD HH:mm:ss');
     db.prepare("UPDATE bookings SET status = 'expired', updated_at = ? WHERE id = ?").run(now, bookingId);
 
-    recordQuotaChange(booking.family_id, days, '超时自动释放退还额度', bookingId);
+    recordQuotaChange(booking.family_id, days, '超时自动释放退还额度', bookingId, booking.source || 'normal');
     promoteFromWaitlist(booking.room_id, booking.start_date, booking.end_date);
     createNotification('booking_expired', '预订超时释放', `预订 ${bookingId} 已超时自动释放，候补用户将收到通知`, bookingId);
 

@@ -149,12 +149,16 @@ export function promoteFromWaitlist(roomId: string, startDate: string, endDate: 
          AND w.start_date <= ?
          AND w.end_date >= ?
        ORDER BY w.position, w.created_at
-       LIMIT 5`
+       LIMIT 20`
     )
     .all(room.type, endDate, startDate) as any[];
 
   for (const candidate of candidates) {
     try {
+      if (candidate.last_notified_room_id === roomId) {
+        continue;
+      }
+
       const days = calculateDays(candidate.start_date, candidate.end_date);
       const quota = getFamilyQuota(candidate.family_id);
       if (quota.available_quota < days) {
@@ -190,7 +194,7 @@ export function promoteFromWaitlist(roomId: string, startDate: string, endDate: 
         now
       );
 
-      db.prepare("UPDATE waitlist SET status = 'notified', notified_at = ? WHERE id = ?").run(now, candidate.id);
+      db.prepare("UPDATE waitlist SET status = 'notified', notified_at = ?, last_notified_room_id = ? WHERE id = ?").run(now, roomId, candidate.id);
 
       createNotification(
         'waitlist_confirm_pending',
@@ -240,6 +244,7 @@ export function confirmWaitlist(confirmationId: string): any {
       start_date: confirm.start_date,
       end_date: confirm.end_date,
       notes: `候补补位确认，确认ID: ${confirmationId}`,
+      source: 'waitlist',
     });
 
     db.prepare("UPDATE waitlist_confirmations SET status = 'confirmed', confirmed_at = ? WHERE id = ?").run(now, confirmationId);
@@ -290,12 +295,12 @@ export function checkAndExpireConfirmations(): number {
     try {
       const tx = db.transaction(() => {
         db.prepare("UPDATE waitlist_confirmations SET status = 'expired' WHERE id = ?").run(c.id);
-        db.prepare("UPDATE waitlist SET status = 'waiting' WHERE id = ?").run(c.waitlist_id);
+        db.prepare("UPDATE waitlist SET status = 'cancelled' WHERE id = ?").run(c.waitlist_id);
 
         createNotification(
           'waitlist_confirm_expired',
           '候补确认超时',
-          `候补确认已超时，将自动通知下一位`,
+          `候补确认已超时，将自动通知下一位，原候补不再重复通知`,
           c.id
         );
 

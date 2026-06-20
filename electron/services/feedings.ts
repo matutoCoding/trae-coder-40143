@@ -2,6 +2,7 @@ import { getDb } from '../db';
 import { v4 as uuidv4 } from 'uuid';
 import dayjs from 'dayjs';
 import { createNotification } from './bookings';
+import { createHealthFollowup } from './health';
 
 export interface FeedingRecord {
   id: string;
@@ -121,6 +122,17 @@ export function checkinFeeding(
         `${pet?.name || '宠物'}(${family?.name || ''}) 出现${ANOMALY_TYPES[anomalyType] || anomalyType}异常，${TIME_SLOT_LABELS[timeSlot]}时段，请及时跟进！`,
         bookingId
       );
+      try {
+        createHealthFollowup({
+          feeding_record_id: id,
+          pet_id: booking.pet_id,
+          family_id: booking.family_id,
+          anomaly_type: anomalyType,
+          initial_note: `${TIME_SLOT_LABELS[timeSlot]}喂养打卡上报${ANOMALY_TYPES[anomalyType] || anomalyType}，备注：${note || '无'}`,
+        });
+      } catch (e) {
+        console.error('Failed to create health followup:', e);
+      }
     }
 
     return db.prepare('SELECT * FROM feeding_records WHERE id = ?').get(id) as FeedingRecord;

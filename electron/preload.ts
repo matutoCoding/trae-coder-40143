@@ -60,10 +60,31 @@ const api = {
     anomalies: (startDate: string, endDate: string) =>
       ipcRenderer.invoke('feedings:anomalies', startDate, endDate),
   },
+  cleanings: {
+    list: (date?: string) => ipcRenderer.invoke('cleanings:list', date),
+    stats: (status?: string, date?: string) => ipcRenderer.invoke('cleanings:stats', status, date),
+    start: (cleaningId: string, assignedTo: string) =>
+      ipcRenderer.invoke('cleanings:start', cleaningId, assignedTo),
+    finish: (cleaningId: string, inspector: string, note?: string) =>
+      ipcRenderer.invoke('cleanings:finish', cleaningId, inspector, note),
+  },
+  health: {
+    list: (status?: string) => ipcRenderer.invoke('health:list', status),
+    stats: () => ipcRenderer.invoke('health:stats'),
+    assign: (followupId: string, assignedTo: string) =>
+      ipcRenderer.invoke('health:assign', followupId, assignedTo),
+    recordHandling: (followupId: string, result: string, recheckTime?: string) =>
+      ipcRenderer.invoke('health:recordHandling', followupId, result, recheckTime),
+    close: (followupId: string, closeNote: string) =>
+      ipcRenderer.invoke('health:close', followupId, closeNote),
+  },
   notifications: {
-    list: () => ipcRenderer.invoke('notifications:list'),
+    list: (params?: any) => ipcRenderer.invoke('notifications:list', params),
+    listTypes: () => ipcRenderer.invoke('notifications:listTypes'),
     markRead: (id: string) => ipcRenderer.invoke('notifications:markRead', id),
     markAllRead: () => ipcRenderer.invoke('notifications:markAllRead'),
+    markHandled: (id: string) => ipcRenderer.invoke('notifications:markHandled', id),
+    markHandledByType: (type: string) => ipcRenderer.invoke('notifications:markHandledByType', type),
   },
 };
 

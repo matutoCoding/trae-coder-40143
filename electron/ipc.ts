@@ -6,6 +6,8 @@ import * as bookingsService from './services/bookings';
 import * as waitlistService from './services/waitlist';
 import * as feedingsService from './services/feedings';
 import * as notificationsService from './services/notifications';
+import * as cleaningsService from './services/cleanings';
+import * as healthService from './services/health';
 
 export function initIpcHandlers() {
   ipcMain.handle('rooms:list', () => roomsService.listRooms());
@@ -76,7 +78,31 @@ export function initIpcHandlers() {
     feedingsService.getFeedingAnomalies(startDate, endDate)
   );
 
-  ipcMain.handle('notifications:list', () => notificationsService.listNotifications());
+  ipcMain.handle('cleanings:list', (_e, date) => cleaningsService.listCleanings(date));
+  ipcMain.handle('cleanings:stats', (_e, status, date) => cleaningsService.getCleaningStats(status, date));
+  ipcMain.handle('cleanings:start', (_e, cleaningId, assignedTo) =>
+    cleaningsService.startCleaning(cleaningId, assignedTo)
+  );
+  ipcMain.handle('cleanings:finish', (_e, cleaningId, inspector, note) =>
+    cleaningsService.finishCleaning(cleaningId, inspector, note)
+  );
+
+  ipcMain.handle('health:list', (_e, status) => healthService.listFollowups(status));
+  ipcMain.handle('health:stats', () => healthService.getFollowupStats());
+  ipcMain.handle('health:assign', (_e, followupId, assignedTo) =>
+    healthService.assignFollowup(followupId, assignedTo)
+  );
+  ipcMain.handle('health:recordHandling', (_e, followupId, result, recheckTime) =>
+    healthService.recordHandling(followupId, result, recheckTime)
+  );
+  ipcMain.handle('health:close', (_e, followupId, closeNote) =>
+    healthService.closeFollowup(followupId, closeNote)
+  );
+
+  ipcMain.handle('notifications:list', (_e, params) => notificationsService.listNotifications(params));
+  ipcMain.handle('notifications:listTypes', () => notificationsService.listNotificationTypes());
   ipcMain.handle('notifications:markRead', (_e, id) => notificationsService.markNotificationRead(id));
   ipcMain.handle('notifications:markAllRead', () => notificationsService.markAllNotificationsRead());
+  ipcMain.handle('notifications:markHandled', (_e, id) => notificationsService.markNotificationHandled(id));
+  ipcMain.handle('notifications:markHandledByType', (_e, type) => notificationsService.markNotificationsHandledByType(type));
 }

@@ -54,6 +54,7 @@ export interface Booking {
   status: 'pending' | 'checked_in' | 'checked_out' | 'cancelled' | 'expired';
   deadline: string;
   total_amount: number;
+  source: string;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -114,6 +115,7 @@ export interface QuotaTransaction {
   operator: string | null;
   related_booking_id: string | null;
   package_id: string | null;
+  source_type: string;
   created_at: string;
 }
 
@@ -150,7 +152,50 @@ export interface Notification {
   content: string;
   related_id: string | null;
   is_read: number;
+  is_handled: number;
+  handled_at: string | null;
   created_at: string;
+}
+
+export interface RoomCleaning {
+  id: string;
+  room_id: string;
+  room_name?: string;
+  room_type?: string;
+  room_capacity?: number;
+  status: 'pending' | 'in_progress' | 'done' | 'overdue';
+  booking_id: string | null;
+  assigned_to: string | null;
+  check_out_time: string | null;
+  start_cleaning_at: string | null;
+  finished_at: string | null;
+  inspection_note: string | null;
+  inspector: string | null;
+  is_overdue: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HealthFollowup {
+  id: string;
+  feeding_record_id: string | null;
+  pet_id: string;
+  pet_name?: string;
+  pet_species?: string;
+  family_id: string;
+  family_name?: string;
+  contact_person?: string;
+  family_phone?: string;
+  anomaly_type: string;
+  initial_note: string | null;
+  assigned_to: string | null;
+  status: 'open' | 'handling' | 'pending_recheck' | 'closed';
+  handling_result: string | null;
+  recheck_time: string | null;
+  close_note: string | null;
+  closed_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface DayScheduleRoom {

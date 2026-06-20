@@ -1,5 +1,6 @@
 import { checkAndExpireBookings } from './services/bookings';
 import { checkAndExpireConfirmations } from './services/waitlist';
+import { checkAndMarkOverdueCleanings } from './services/cleanings';
 
 let schedulerTimer: NodeJS.Timeout | null = null;
 
@@ -24,6 +25,14 @@ export function startScheduler() {
     } catch (e) {
       console.error('[Scheduler] Error checking expired confirmations:', e);
     }
+    try {
+      const overdue = checkAndMarkOverdueCleanings();
+      if (overdue > 0) {
+        console.log(`[Scheduler] Marked ${overdue} cleaning tasks as overdue`);
+      }
+    } catch (e) {
+      console.error('[Scheduler] Error checking overdue cleanings:', e);
+    }
   }, 60 * 1000);
 
   try {
@@ -35,6 +44,11 @@ export function startScheduler() {
     checkAndExpireConfirmations();
   } catch (e) {
     console.error('[Scheduler] Initial confirmation check failed:', e);
+  }
+  try {
+    checkAndMarkOverdueCleanings();
+  } catch (e) {
+    console.error('[Scheduler] Initial overdue cleanings check failed:', e);
   }
 }
 

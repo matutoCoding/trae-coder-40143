@@ -40,6 +40,8 @@ function initSchema() {
       description TEXT,
       price_per_day REAL NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'active',
+      cleaning_status TEXT NOT NULL DEFAULT 'clean',
+      last_cleaned_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -64,6 +66,7 @@ function initSchema() {
       operator TEXT,
       related_booking_id TEXT,
       package_id TEXT,
+      source_type TEXT NOT NULL DEFAULT 'normal',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (family_id) REFERENCES families(id) ON DELETE CASCADE
     );
@@ -104,6 +107,7 @@ function initSchema() {
       status TEXT NOT NULL DEFAULT 'pending',
       deadline TEXT NOT NULL,
       total_amount REAL NOT NULL DEFAULT 0,
+      source TEXT NOT NULL DEFAULT 'normal',
       notes TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -122,6 +126,7 @@ function initSchema() {
       position INTEGER NOT NULL,
       status TEXT NOT NULL DEFAULT 'waiting',
       notified_at TEXT,
+      last_notified_room_id TEXT,
       notes TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (family_id) REFERENCES families(id),
@@ -169,7 +174,47 @@ function initSchema() {
       content TEXT NOT NULL,
       related_id TEXT,
       is_read INTEGER NOT NULL DEFAULT 0,
+      is_handled INTEGER NOT NULL DEFAULT 0,
+      handled_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS room_cleanings (
+      id TEXT PRIMARY KEY,
+      room_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      booking_id TEXT,
+      assigned_to TEXT,
+      check_out_time TEXT,
+      start_cleaning_at TEXT,
+      finished_at TEXT,
+      inspection_note TEXT,
+      inspector TEXT,
+      is_overdue INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (room_id) REFERENCES rooms(id),
+      FOREIGN KEY (booking_id) REFERENCES bookings(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS health_followups (
+      id TEXT PRIMARY KEY,
+      feeding_record_id TEXT,
+      pet_id TEXT NOT NULL,
+      family_id TEXT NOT NULL,
+      anomaly_type TEXT NOT NULL,
+      initial_note TEXT,
+      assigned_to TEXT,
+      status TEXT NOT NULL DEFAULT 'open',
+      handling_result TEXT,
+      recheck_time TEXT,
+      close_note TEXT,
+      closed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (feeding_record_id) REFERENCES feeding_records(id),
+      FOREIGN KEY (pet_id) REFERENCES pets(id),
+      FOREIGN KEY (family_id) REFERENCES families(id)
     );
 
     CREATE INDEX IF NOT EXISTS idx_bookings_room_dates ON bookings(room_id, start_date, end_date);
@@ -181,25 +226,60 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_feeding_anomaly ON feeding_records(is_anomaly);
     CREATE INDEX IF NOT EXISTS idx_quota_family ON quota_transactions(family_id);
     CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(is_read);
+    CREATE INDEX IF NOT EXISTS idx_notifications_handled ON notifications(is_handled);
+    CREATE INDEX IF NOT EXISTS idx_notifications_type ON notifications(type);
     CREATE INDEX IF NOT EXISTS idx_wl_confirm_status ON waitlist_confirmations(status);
     CREATE INDEX IF NOT EXISTS idx_wl_confirm_deadline ON waitlist_confirmations(confirm_deadline);
+    CREATE INDEX IF NOT EXISTS idx_cleanings_status ON room_cleanings(status);
+    CREATE INDEX IF NOT EXISTS idx_cleanings_room ON room_cleanings(room_id);
+    CREATE INDEX IF NOT EXISTS idx_health_status ON health_followups(status);
+    CREATE INDEX IF NOT EXISTS idx_health_pet ON health_followups(pet_id);
   `);
 }
 
 function runMigrations() {
   if (!db) return;
 
-  const cols = db.prepare("PRAGMA table_info(feeding_records)").all() as any[];
-  if (!cols.find((c) => c.name === 'is_anomaly')) {
+  const feedingCols = db.prepare("PRAGMA table_info(feeding_records)").all() as any[];
+  if (!feedingCols.find((c) => c.name === 'is_anomaly')) {
     db.exec('ALTER TABLE feeding_records ADD COLUMN is_anomaly INTEGER NOT NULL DEFAULT 0');
   }
-  if (!cols.find((c) => c.name === 'anomaly_type')) {
+  if (!feedingCols.find((c) => c.name === 'anomaly_type')) {
     db.exec('ALTER TABLE feeding_records ADD COLUMN anomaly_type TEXT');
   }
 
   const qCols = db.prepare("PRAGMA table_info(quota_transactions)").all() as any[];
   if (!qCols.find((c) => c.name === 'package_id')) {
     db.exec('ALTER TABLE quota_transactions ADD COLUMN package_id TEXT');
+  }
+  if (!qCols.find((c) => c.name === 'source_type')) {
+    db.exec("ALTER TABLE quota_transactions ADD COLUMN source_type TEXT NOT NULL DEFAULT 'normal'");
+  }
+
+  const roomCols = db.prepare("PRAGMA table_info(rooms)").all() as any[];
+  if (!roomCols.find((c) => c.name === 'cleaning_status')) {
+    db.exec("ALTER TABLE rooms ADD COLUMN cleaning_status TEXT NOT NULL DEFAULT 'clean'");
+  }
+  if (!roomCols.find((c) => c.name === 'last_cleaned_at')) {
+    db.exec('ALTER TABLE rooms ADD COLUMN last_cleaned_at TEXT');
+  }
+
+  const bookingCols = db.prepare("PRAGMA table_info(bookings)").all() as any[];
+  if (!bookingCols.find((c) => c.name === 'source')) {
+    db.exec("ALTER TABLE bookings ADD COLUMN source TEXT NOT NULL DEFAULT 'normal'");
+  }
+
+  const wlCols = db.prepare("PRAGMA table_info(waitlist)").all() as any[];
+  if (!wlCols.find((c) => c.name === 'last_notified_room_id')) {
+    db.exec('ALTER TABLE waitlist ADD COLUMN last_notified_room_id TEXT');
+  }
+
+  const notifCols = db.prepare("PRAGMA table_info(notifications)").all() as any[];
+  if (!notifCols.find((c) => c.name === 'is_handled')) {
+    db.exec('ALTER TABLE notifications ADD COLUMN is_handled INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!notifCols.find((c) => c.name === 'handled_at')) {
+    db.exec('ALTER TABLE notifications ADD COLUMN handled_at TEXT');
   }
 }
 

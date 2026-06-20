@@ -35,6 +35,19 @@ import dayjs from 'dayjs';
 import type { Family, Pet, QuotaInfo, QuotaTransaction, QuotaPackage, MonthlyBill } from '../types';
 import { BOOKING_STATUS_LABELS, BOOKING_STATUS_COLORS } from '../types';
 
+const SOURCE_TYPE_LABELS: Record<string, { label: string; color: string }> = {
+  normal: { label: '普通预订', color: 'blue' },
+  waitlist: { label: '候补转正', color: 'purple' },
+  refund: { label: '额度退还', color: 'green' },
+  adjust: { label: '人工调整', color: 'orange' },
+  package: { label: '购买套餐', color: 'cyan' },
+};
+
+const BOOKING_SOURCE_LABELS: Record<string, { label: string; color: string }> = {
+  normal: { label: '普通预订', color: 'blue' },
+  waitlist: { label: '候补转正', color: 'purple' },
+};
+
 function FamiliesPage() {
   const [families, setFamilies] = useState<Family[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
@@ -263,15 +276,17 @@ function FamiliesPage() {
     lines.push(`取消预订,${billData.cancelled_bookings}`);
     lines.push('');
     lines.push('交易记录');
-    lines.push('日期,变动,原因,余额');
+    lines.push('日期,变动,来源类型,原因,余额');
     billData.transactions.forEach((t) => {
-      lines.push(`${dayjs(t.created_at).format('YYYY-MM-DD HH:mm')},${t.change_amount > 0 ? '+' : ''}${t.change_amount} 天,${t.reason || ''},${t.balance_after} 天`);
+      const srcLabel = SOURCE_TYPE_LABELS[t.source_type as keyof typeof SOURCE_TYPE_LABELS]?.label || t.source_type || '';
+      lines.push(`${dayjs(t.created_at).format('YYYY-MM-DD HH:mm')},${t.change_amount > 0 ? '+' : ''}${t.change_amount} 天,${srcLabel},${t.reason || ''},${t.balance_after} 天`);
     });
     lines.push('');
     lines.push('预订记录');
-    lines.push('宠物,房间,日期,状态,金额');
+    lines.push('宠物,房间,日期,来源,状态,金额');
     billData.bookings.forEach((b: any) => {
-      lines.push(`${b.pet_name || ''},${b.room_name || ''},${b.start_date} ~ ${b.end_date},${BOOKING_STATUS_LABELS[b.status as keyof typeof BOOKING_STATUS_LABELS] || b.status},¥${b.total_amount}`);
+      const srcLabel = BOOKING_SOURCE_LABELS[b.source as keyof typeof BOOKING_SOURCE_LABELS]?.label || b.source || '';
+      lines.push(`${b.pet_name || ''},${b.room_name || ''},${b.start_date} ~ ${b.end_date},${srcLabel},${BOOKING_STATUS_LABELS[b.status as keyof typeof BOOKING_STATUS_LABELS] || b.status},¥${b.total_amount}`);
     });
     const csvContent = '\uFEFF' + lines.join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -303,6 +318,16 @@ function FamiliesPage() {
         </span>
       ),
     },
+    {
+      title: '来源类型',
+      dataIndex: 'source_type',
+      key: 'source_type',
+      width: 110,
+      render: (v: string) => {
+        const cfg = SOURCE_TYPE_LABELS[v] || { label: v || '-', color: 'default' };
+        return <Tag color={cfg.color}>{cfg.label}</Tag>;
+      },
+    },
     { title: '原因', dataIndex: 'reason', key: 'reason', ellipsis: true },
     {
       title: '余额',
@@ -321,6 +346,16 @@ function FamiliesPage() {
       key: 'dates',
       width: 180,
       render: (_: any, r: any) => `${r.start_date} ~ ${r.end_date}`,
+    },
+    {
+      title: '来源',
+      dataIndex: 'source',
+      key: 'source',
+      width: 100,
+      render: (v: string) => {
+        const cfg = BOOKING_SOURCE_LABELS[v] || { label: v || '-', color: 'default' };
+        return <Tag color={cfg.color}>{cfg.label}</Tag>;
+      },
     },
     {
       title: '状态',
@@ -579,18 +614,22 @@ function FamiliesPage() {
           size="small"
           dataSource={quotaHistory}
           locale={{ emptyText: '暂无记录' }}
-          renderItem={(t) => (
-            <List.Item>
-              <Space style={{ width: '100%' }} split={<Divider type="vertical" />}>
-                <Tag color={t.change_amount > 0 ? 'green' : 'red'}>
-                  {t.change_amount > 0 ? '+' : ''}{t.change_amount} 天
-                </Tag>
-                <span>{t.reason}</span>
-                <span style={{ color: '#8c8c8c' }}>可用: {t.balance_after}天</span>
-                <span style={{ color: '#bfbfbf', marginLeft: 'auto' }}>{t.created_at}</span>
-              </Space>
-            </List.Item>
-          )}
+          renderItem={(t) => {
+            const srcCfg = SOURCE_TYPE_LABELS[t.source_type as keyof typeof SOURCE_TYPE_LABELS] || { label: t.source_type || '-', color: 'default' };
+            return (
+              <List.Item>
+                <Space style={{ width: '100%' }} split={<Divider type="vertical" />}>
+                  <Tag color={t.change_amount > 0 ? 'green' : 'red'}>
+                    {t.change_amount > 0 ? '+' : ''}{t.change_amount} 天
+                  </Tag>
+                  <Tag color={srcCfg.color}>{srcCfg.label}</Tag>
+                  <span>{t.reason}</span>
+                  <span style={{ color: '#8c8c8c' }}>可用: {t.balance_after}天</span>
+                  <span style={{ color: '#bfbfbf', marginLeft: 'auto' }}>{t.created_at}</span>
+                </Space>
+              </List.Item>
+            );
+          }}
         />
       </Modal>
 
@@ -604,7 +643,7 @@ function FamiliesPage() {
           </Button>,
           <Button key="close" onClick={() => setBillModalOpen(false)}>关闭</Button>,
         ]}
-        width={800}
+        width={850}
       >
         <div style={{ marginBottom: 16 }}>
           <DatePicker
@@ -653,6 +692,7 @@ function FamiliesPage() {
               pagination={false}
               locale={{ emptyText: '暂无交易记录' }}
               style={{ marginBottom: 16 }}
+              scroll={{ x: 700 }}
             />
 
             <Divider orientation="left" style={{ fontSize: 14 }}>预订记录</Divider>
@@ -663,6 +703,7 @@ function FamiliesPage() {
               dataSource={billData.bookings}
               pagination={false}
               locale={{ emptyText: '暂无预订记录' }}
+              scroll={{ x: 700 }}
             />
           </>
         )}

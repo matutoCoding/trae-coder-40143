@@ -179,18 +179,21 @@ function SchedulePage() {
   };
 
   const renderBookingActions = (booking: any) => {
+    const stopBubble = (e: React.MouseEvent) => e.stopPropagation();
     const actions: React.ReactNode[] = [];
     if (booking.status === 'pending') {
       actions.push(
-        <Button key="ci" type="link" size="small" icon={<CheckOutlined />} onClick={() => handleAction(booking, 'checkin')}>入住</Button>,
-        <Popconfirm key="cc" title="确认取消？" onConfirm={() => handleAction(booking, 'cancel')}>
-          <Button type="link" size="small" danger icon={<CloseOutlined />}>取消</Button>
-        </Popconfirm>
+        <Button key="ci" type="link" size="small" icon={<CheckOutlined />} onClick={(e) => { stopBubble(e); handleAction(booking, 'checkin'); }}>入住</Button>,
+        <span key="cc" onClick={stopBubble} style={{ display: 'inline-block' }}>
+          <Popconfirm title="确认取消？" onConfirm={() => handleAction(booking, 'cancel')}>
+            <Button type="link" size="small" danger icon={<CloseOutlined />}>取消</Button>
+          </Popconfirm>
+        </span>
       );
     }
     if (booking.status === 'checked_in') {
       actions.push(
-        <Button key="co" type="link" size="small" icon={<LogoutOutlined />} onClick={() => handleAction(booking, 'checkout')}>退房</Button>
+        <Button key="co" type="link" size="small" icon={<LogoutOutlined />} onClick={(e) => { stopBubble(e); handleAction(booking, 'checkout'); }}>退房</Button>
       );
     }
     return actions.length > 0 ? <Space size={4}>{actions}</Space> : null;
@@ -267,6 +270,7 @@ function SchedulePage() {
                       {dayInfo.bookings.slice(0, 3).map((b: any) => (
                         <div
                           key={b.id}
+                          onClick={(e) => e.stopPropagation()}
                           style={{
                             fontSize: 10,
                             padding: '2px 4px',

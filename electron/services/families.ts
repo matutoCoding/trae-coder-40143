@@ -115,22 +115,23 @@ export function adjustFamilyQuota(familyId: string, amount: number, reason: stri
 
   const txId = uuidv4();
   db.prepare(
-    `INSERT INTO quota_transactions (id, family_id, change_amount, balance_after, reason, operator, related_booking_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO quota_transactions (id, family_id, change_amount, balance_after, reason, operator, related_booking_id, source_type, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'adjust', ?)`
   ).run(txId, familyId, amount, newAvailable, reason || '管理员调整总额度', operator || null, null, now);
 
   return { quota_pool: newTotal, available_quota: newAvailable, transaction_id: txId };
 }
 
-export function recordQuotaChange(familyId: string, changeAmount: number, reason: string, relatedBookingId?: string) {
+export function recordQuotaChange(familyId: string, changeAmount: number, reason: string, relatedBookingId?: string, sourceType?: string) {
   const db = getDb();
   const quota = getFamilyQuota(familyId);
   const txId = uuidv4();
   const now = dayjs().format('YYYY-MM-DD HH:mm:ss');
+  const source = sourceType || (changeAmount < 0 ? 'normal' : 'refund');
   db.prepare(
-    `INSERT INTO quota_transactions (id, family_id, change_amount, balance_after, reason, operator, related_booking_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(txId, familyId, changeAmount, quota.available_quota, reason, null, relatedBookingId || null, now);
+    `INSERT INTO quota_transactions (id, family_id, change_amount, balance_after, reason, operator, related_booking_id, source_type, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(txId, familyId, changeAmount, quota.available_quota, reason, null, relatedBookingId || null, source, now);
 }
 
 export function getQuotaHistory(familyId: string): QuotaTransaction[] {
@@ -161,8 +162,8 @@ export function purchasePackage(familyId: string, packageId: string): any {
     const quota = getFamilyQuota(familyId);
     const txId = uuidv4();
     db.prepare(
-      `INSERT INTO quota_transactions (id, family_id, change_amount, balance_after, reason, operator, related_booking_id, package_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO quota_transactions (id, family_id, change_amount, balance_after, reason, operator, related_booking_id, package_id, source_type, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'package', ?)`
     ).run(txId, familyId, pkg.days, quota.available_quota, `购买${pkg.name}（+${pkg.days}天）`, null, null, packageId, now);
 
     return { quota_pool: newTotal, available_quota: quota.available_quota, transaction_id: txId, package: pkg };
