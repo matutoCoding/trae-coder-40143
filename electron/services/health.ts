@@ -73,8 +73,12 @@ export function listFollowups(status?: string) {
   `;
   const values: any[] = [];
   if (status) {
-    sql += ' WHERE hf.status = ?';
-    values.push(status);
+    const statuses = status.split(',').map((s) => s.trim()).filter(Boolean);
+    if (statuses.length > 0) {
+      const placeholders = statuses.map(() => '?').join(',');
+      sql += ` WHERE hf.status IN (${placeholders})`;
+      values.push(...statuses);
+    }
   }
   sql += ' ORDER BY hf.created_at DESC';
   return db.prepare(sql).all(...values) as any[];

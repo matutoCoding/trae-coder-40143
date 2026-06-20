@@ -10,6 +10,8 @@ export interface Room {
   description: string | null;
   price_per_day: number;
   status: string;
+  cleaning_status: string;
+  last_cleaned_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -68,11 +70,17 @@ export function getRoomSchedule(startDate: string, endDate: string) {
     )
     .all(endDate, startDate) as any[];
 
+  const cleanings = db.prepare(
+    `SELECT room_id, status as cleaning_status FROM rooms WHERE cleaning_status IN ('pending', 'in_progress', 'overdue')`
+  ).all() as any[];
+  const cleaningMap = new Map(cleanings.map((c: any) => [c.room_id, c.cleaning_status]));
+
   return rooms.map((room) => {
     const roomBookings = bookings.filter((b) => b.room_id === room.id);
     return {
       ...room,
       bookings: roomBookings,
+      cleaning_status: cleaningMap.get(room.id) || 'clean',
     };
   });
 }
@@ -93,6 +101,11 @@ export function getDaySchedule(date: string) {
          AND b.end_date >= ?`
     );
 
+  const cleanings = db.prepare(
+    `SELECT id, room_id, status as cleaning_status FROM rooms WHERE cleaning_status IN ('pending', 'in_progress', 'overdue')`
+  ).all() as any[];
+  const cleaningMap = new Map(cleanings.map((c: any) => [c.room_id, c.cleaning_status]));
+
   return rooms.map((room) => {
     const roomBookings = bookings.all(room.id, date, date) as any[];
     const occupied = roomBookings.length;
@@ -105,6 +118,7 @@ export function getDaySchedule(date: string) {
       occupied,
       available: Math.max(0, room.capacity - occupied),
       bookings: roomBookings,
+      cleaning_status: cleaningMap.get(room.id) || 'clean',
     };
   });
 }
@@ -129,6 +143,11 @@ export function getWeekSchedule(weekStart: string) {
          AND b.end_date >= ?`
     )
     .all(endDateStr, startDateStr) as any[];
+
+  const cleanings = db.prepare(
+    `SELECT id, room_id, status as cleaning_status FROM rooms WHERE cleaning_status IN ('pending', 'in_progress', 'overdue')`
+  ).all() as any[];
+  const cleaningMap = new Map(cleanings.map((c: any) => [c.room_id, c.cleaning_status]));
 
   const days: string[] = [];
   for (let i = 0; i < 7; i++) {
@@ -157,6 +176,7 @@ export function getWeekSchedule(weekStart: string) {
         room_type: room.type,
         capacity: room.capacity,
         price_per_day: room.price_per_day,
+        cleaning_status: cleaningMap.get(room.id) || 'clean',
         days: dayMap,
       };
     }),
@@ -165,8 +185,11 @@ export function getWeekSchedule(weekStart: string) {
 
 export function checkRoomAvailability(roomId: string, startDate: string, endDate: string, excludeBookingId?: string): boolean {
   const db = getDb();
-  const room = db.prepare('SELECT capacity FROM rooms WHERE id = ?').get(roomId) as { capacity: number } | undefined;
+  const room = db.prepare('SELECT capacity, cleaning_status FROM rooms WHERE id = ?').get(roomId) as { capacity: number; cleaning_status: string } | undefined;
   if (!room) throw new Error('房间不存在');
+  if (['pending', 'in_progress', 'overdue'].includes(room.cleaning_status)) {
+    throw new Error('房间正在清洁中，暂时无法预订');
+  }
   const capacity = room.capacity;
 
   let sql = `SELECT start_date, end_date FROM bookings
@@ -202,6 +225,8 @@ export function getRoomDailySlots(roomId: string, startDate: string, endDate: st
   const room = db.prepare('SELECT * FROM rooms WHERE id = ?').get(roomId) as Room | undefined;
   if (!room) throw new Error('房间不存在');
 
+  const isCleaning = ['pending', 'in_progress', 'overdue'].includes(room.cleaning_status || 'clean');
+
   let sql = `SELECT start_date, end_date FROM bookings
              WHERE room_id = ?
                AND status IN ('pending', 'checked_in')
@@ -221,11 +246,11 @@ export function getRoomDailySlots(roomId: string, startDate: string, endDate: st
     days.push({
       date: dateStr,
       occupied: countOnDay,
-      available: Math.max(0, room.capacity - countOnDay),
-      isFull: countOnDay >= room.capacity,
+      available: isCleaning ? 0 : Math.max(0, room.capacity - countOnDay),
+      isFull: isCleaning || countOnDay >= room.capacity,
     });
     current = current.add(1, 'day');
   }
 
-  return { room_id: roomId, room_name: room.name, capacity: room.capacity, days };
+  return { room_id: roomId, room_name: room.name, capacity: room.capacity, cleaning_status: room.cleaning_status || 'clean', days };
 }

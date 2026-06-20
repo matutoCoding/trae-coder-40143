@@ -36,6 +36,7 @@ function SchedulePage() {
   const [rooms, setRooms] = useState<any[]>([]);
   const [families, setFamilies] = useState<Family[]>([]);
   const [pets, setPets] = useState<Pet[]>([]);
+  const [selectedDate, setSelectedDate] = useState(dayjs());
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([
     dayjs().startOf('day'),
     dayjs().add(7, 'day').endOf('day'),
@@ -50,13 +51,16 @@ function SchedulePage() {
   const [actionType, setActionType] = useState<'checkin' | 'checkout' | 'cancel'>('checkin');
   const [form] = Form.useForm();
 
+  const CLEANING_STATUS_LABELS: Record<string, { label: string; color: string }> = {
+    pending: { label: '待清洁', color: 'orange' },
+    in_progress: { label: '清洁中', color: 'blue' },
+    overdue: { label: '清洁超时', color: 'red' },
+  };
+
   const loadCardData = async () => {
     try {
-      const [startDate, endDate] = dateRange;
-      const schedule = await window.api.rooms.getSchedule(
-        startDate.format('YYYY-MM-DD'),
-        endDate.format('YYYY-MM-DD')
-      );
+      const dateStr = selectedDate.format('YYYY-MM-DD');
+      const schedule = await window.api.rooms.getDaySchedule(dateStr);
       setRooms(schedule);
       const fams = await window.api.families.list();
       setFamilies(fams);
@@ -79,9 +83,15 @@ function SchedulePage() {
   useEffect(() => {
     if (viewMode === 'card') loadCardData();
     else loadWeekData();
-  }, [viewMode, dateRange, weekStart]);
+  }, [viewMode, selectedDate, weekStart]);
 
   const handleOpenBooking = (room: any, date?: string) => {
+    const cs = room.cleaning_status;
+    if (cs && ['pending', 'in_progress', 'overdue'].includes(cs)) {
+      const label = CLEANING_STATUS_LABELS[cs];
+      message.warning(`房间正在${label?.label || '清洁中'}，暂时无法预订`);
+      return;
+    }
     setSelectedRoom(room);
     form.resetFields();
     if (date) {
@@ -90,8 +100,8 @@ function SchedulePage() {
       });
     }
     setModalOpen(true);
-    if (room.capacity > 1) {
-      loadDailySlots(room.id);
+    if (room.capacity > 1 || room.room_capacity > 1) {
+      loadDailySlots(room.id || room.room_id);
     }
   };
 
@@ -230,36 +240,46 @@ function SchedulePage() {
             </tr>
           </thead>
           <tbody>
-            {weekRooms.map((room) => (
-              <tr key={room.room_id}>
-                <td style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0', fontWeight: 500 }}>
-                  <div>{room.room_name}</div>
-                  <div style={{ fontSize: 11, color: '#8c8c8c' }}>
-                    <Tag color="blue" style={{ fontSize: 10 }}>{ROOM_TYPE_LABELS[room.room_type]}</Tag>
-                    容纳{room.capacity}
-                  </div>
-                </td>
-                {days.map((d) => {
-                  const dayInfo = room.days[d];
-                  const isFull = dayInfo.available === 0;
-                  const isToday = d === dayjs().format('YYYY-MM-DD');
-                  return (
-                    <td
-                      key={d}
-                      style={{
-                        padding: 4,
-                        borderBottom: '1px solid #f0f0f0',
-                        background: isToday ? '#f0f9ff' : undefined,
-                        verticalAlign: 'top',
-                        cursor: 'pointer',
-                        minWidth: 100,
-                      }}
-                      onClick={() => {
-                        if (!isFull) handleOpenBooking(room, d);
-                      }}
-                    >
+            {weekRooms.map((room) => {
+              const cs = room.cleaning_status || 'clean';
+              const isCleaning = ['pending', 'in_progress', 'overdue'].includes(cs);
+              const cleaningMeta = CLEANING_STATUS_LABELS[cs];
+              return (
+                <tr key={room.room_id}>
+                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0', fontWeight: 500 }}>
+                    <div>{room.room_name}</div>
+                    <div style={{ fontSize: 11, color: '#8c8c8c' }}>
+                      <Tag color="blue" style={{ fontSize: 10 }}>{ROOM_TYPE_LABELS[room.room_type]}</Tag>
+                      容纳{room.capacity}
+                      {isCleaning && cleaningMeta && (
+                        <Tag color={cleaningMeta.color} style={{ fontSize: 10, marginLeft: 4 }}>{cleaningMeta.label}</Tag>
+                      )}
+                    </div>
+                  </td>
+                  {days.map((d) => {
+                    const dayInfo = room.days[d];
+                    const isFull = dayInfo.available === 0 || isCleaning;
+                    const isToday = d === dayjs().format('YYYY-MM-DD');
+                    return (
+                      <td
+                        key={d}
+                        style={{
+                          padding: 4,
+                          borderBottom: '1px solid #f0f0f0',
+                          background: isCleaning ? '#fff1f0' : isToday ? '#f0f9ff' : undefined,
+                          verticalAlign: 'top',
+                          cursor: isCleaning ? 'not-allowed' : 'pointer',
+                          minWidth: 100,
+                          opacity: isCleaning ? 0.6 : 1,
+                        }}
+                        onClick={() => {
+                          if (!isCleaning && !isFull) handleOpenBooking(room, d);
+                        }}
+                      >
                       <div style={{ textAlign: 'center', marginBottom: 4 }}>
-                        {isFull ? (
+                        {isCleaning && cleaningMeta ? (
+                          <Tag color={cleaningMeta.color} style={{ fontSize: 10 }}>{cleaningMeta.label}</Tag>
+                        ) : isFull ? (
                           <Tag color="red" style={{ fontSize: 10 }}>已满</Tag>
                         ) : (
                           <Tag color={dayInfo.available < room.capacity ? 'orange' : 'green'} style={{ fontSize: 10 }}>
@@ -294,7 +314,8 @@ function SchedulePage() {
                   );
                 })}
               </tr>
-            ))}
+            );
+            })}
           </tbody>
         </table>
       </div>
@@ -303,41 +324,55 @@ function SchedulePage() {
 
   const getCapacityInfo = (room: any) => {
     const cap = room.capacity || 1;
-    const used = room.bookings?.length || 0;
-    if (cap === 1) return used > 0 ? { text: '已占', color: '#ff4d4f' as const } : { text: '空闲', color: '#52c41a' as const };
-    if (used >= cap) return { text: `${used}/${cap} 已满`, color: '#ff4d4f' as const };
-    return { text: `${used}/${cap} 已占`, color: used > 0 ? '#faad14' as const : '#52c41a' as const };
+    const available = room.available != null ? room.available : cap - (room.bookings?.length || 0);
+    const occupied = cap - available;
+    const isCleaning = ['pending', 'in_progress', 'overdue'].includes(room.cleaning_status);
+    if (isCleaning) {
+      const meta = CLEANING_STATUS_LABELS[room.cleaning_status];
+      return { text: meta?.label || '清洁中', color: meta?.color || 'orange' };
+    }
+    if (cap === 1) return occupied > 0 ? { text: '已占', color: '#ff4d4f' as const } : { text: '空闲', color: '#52c41a' as const };
+    if (available === 0) return { text: `${occupied}/${cap} 已满`, color: '#ff4d4f' as const };
+    return { text: `${available}/${cap} 可订`, color: occupied > 0 ? '#faad14' as const : '#52c41a' as const };
   };
 
   const renderCardView = () => (
     <Row gutter={[16, 16]}>
       {rooms.map((room) => {
         const capInfo = getCapacityInfo(room);
-        const isFull = room.capacity > 1 ? (room.bookings?.length || 0) >= room.capacity : (room.bookings?.length || 0) > 0;
+        const isCleaning = ['pending', 'in_progress', 'overdue'].includes(room.cleaning_status);
+        const cap = room.capacity || 1;
+        const available = room.available != null ? room.available : cap - (room.bookings?.length || 0);
+        const isFull = available === 0 || isCleaning;
         return (
-          <Col xs={24} md={12} lg={8} xl={6} key={room.id}>
+          <Col xs={24} md={12} lg={8} xl={6} key={room.room_id || room.id}>
             <Card
               size="small"
               title={
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span>{room.name}<Tag style={{ marginLeft: 8 }} color="blue">{ROOM_TYPE_LABELS[room.type]}</Tag></span>
+                  <span>{room.room_name || room.name}<Tag style={{ marginLeft: 8 }} color="blue">{ROOM_TYPE_LABELS[room.room_type || room.type]}</Tag></span>
                   <Tag color={capInfo.color}>{capInfo.text}</Tag>
                 </div>
               }
-              extra={room.status === 'active' ? (
+              extra={isCleaning ? (
+                <Tag color="red">不可订</Tag>
+              ) : room.status === 'active' || !room.status ? (
                 <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => handleOpenBooking(room)} disabled={isFull}>
                   {isFull ? '已满' : '预订'}
                 </Button>
               ) : <Tag color="default">停用</Tag>}
+              style={isCleaning ? { opacity: 0.7, borderLeft: '3px solid #ff4d4f' } : undefined}
             >
               <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 8 }}>
-                容纳 {room.capacity} 只 · ¥{room.price_per_day}/天
-                {room.capacity > 1 && <span style={{ marginLeft: 8 }}>（剩余 {Math.max(0, room.capacity - (room.bookings?.length || 0))} 个位置）</span>}
+                容纳 {cap} 只 · ¥{room.price_per_day}/天
+                {cap > 1 && <span style={{ marginLeft: 8 }}>（剩余 {available} 个位置）</span>}
               </div>
               {!room.bookings?.length ? (
-                <div className="empty-tip" style={{ padding: '16px 0' }}>空闲中</div>
+                <div className="empty-tip" style={{ padding: '16px 0' }}>
+                  {isCleaning ? '等待清洁完成' : '空闲中'}
+                </div>
               ) : (
-                room.bookings.map((b: Booking) => (
+                room.bookings.map((b: any) => (
                   <div key={b.id} className={`booking-tag ${b.status}`} style={{ display: 'block', marginBottom: 6 }}>
                     <span>🐾 {b.pet_name} · {b.family_name} <Tag color={BOOKING_STATUS_COLORS[b.status]}>{BOOKING_STATUS_LABELS[b.status]}</Tag></span>
                     <div style={{ fontSize: 11, color: '#595959' }}>{b.start_date} ~ {b.end_date}</div>
@@ -366,9 +401,9 @@ function SchedulePage() {
             ]}
           />
           {viewMode === 'card' && (
-            <RangePicker
-              value={dateRange}
-              onChange={(v) => v && setDateRange(v as [dayjs.Dayjs, dayjs.Dayjs])}
+            <DatePicker
+              value={selectedDate}
+              onChange={(d) => d && setSelectedDate(d)}
               allowClear={false}
             />
           )}

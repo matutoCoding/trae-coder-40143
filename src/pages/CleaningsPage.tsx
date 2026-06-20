@@ -200,16 +200,22 @@ function CleaningsPage() {
       key: 'action',
       width: 140,
       render: (_: any, record: RoomCleaning) => {
-        if (record.status === 'pending') {
+        if (record.status === 'pending' || record.status === 'overdue') {
           return (
-            <Button
-              type="primary"
-              size="small"
-              icon={<PlayCircleOutlined />}
-              onClick={() => handleStartCleaning(record)}
-            >
-              开始清洁
-            </Button>
+            <Space direction="vertical" size={4}>
+              {record.status === 'overdue' && (
+                <Tag color="red" style={{ fontSize: 11 }}>超时未处理</Tag>
+              )}
+              <Button
+                type="primary"
+                size="small"
+                danger={record.status === 'overdue'}
+                icon={<PlayCircleOutlined />}
+                onClick={() => handleStartCleaning(record)}
+              >
+                开始清洁
+              </Button>
+            </Space>
           );
         }
         if (record.status === 'in_progress') {
@@ -224,7 +230,7 @@ function CleaningsPage() {
             </Button>
           );
         }
-        return '-';
+        return <Tag color="green">✓ 已完成</Tag>;
       },
     },
   ];

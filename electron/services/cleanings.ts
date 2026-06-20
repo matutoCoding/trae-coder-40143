@@ -80,7 +80,7 @@ export function startCleaning(cleaningId: string, assignedTo: string): RoomClean
   const tx = db.transaction(() => {
     const now = dayjs().format('YYYY-MM-DD HH:mm:ss');
     db.prepare(
-      "UPDATE room_cleanings SET status = 'in_progress', assigned_to = ?, start_cleaning_at = ?, updated_at = ? WHERE id = ?"
+      "UPDATE room_cleanings SET status = 'in_progress', assigned_to = ?, start_cleaning_at = ?, is_overdue = 0, updated_at = ? WHERE id = ?"
     ).run(assignedTo, now, now, cleaningId);
 
     db.prepare("UPDATE rooms SET cleaning_status = 'in_progress', updated_at = ? WHERE id = (SELECT room_id FROM room_cleanings WHERE id = ?)").run(now, cleaningId);

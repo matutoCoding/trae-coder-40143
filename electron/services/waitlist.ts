@@ -222,7 +222,17 @@ export function confirmWaitlist(confirmationId: string): any {
     const now = dayjs().format('YYYY-MM-DD HH:mm:ss');
     if (dayjs(confirm.confirm_deadline).isBefore(dayjs())) {
       db.prepare("UPDATE waitlist_confirmations SET status = 'expired' WHERE id = ?").run(confirmationId);
-      throw new Error('确认已超时');
+      db.prepare("UPDATE waitlist SET status = 'cancelled' WHERE id = ?").run(confirm.waitlist_id);
+
+      createNotification(
+        'waitlist_confirm_expired',
+        '候补确认超时',
+        `候补确认已超时，将自动通知下一位`,
+        confirmationId
+      );
+
+      promoteFromWaitlist(confirm.room_id, confirm.start_date, confirm.end_date);
+      throw new Error('确认已超时，已自动流转给下一位');
     }
 
     if (!checkRoomAvailability(confirm.room_id, confirm.start_date, confirm.end_date)) {

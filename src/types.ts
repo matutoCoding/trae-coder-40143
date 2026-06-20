@@ -215,6 +215,7 @@ export interface WeekScheduleRoom {
   room_type: string;
   capacity: number;
   price_per_day: number;
+  cleaning_status?: string;
   days: Record<string, { date: string; occupied: number; available: number; bookings: any[] }>;
 }
 
@@ -222,6 +223,7 @@ export interface DailySlots {
   room_id: string;
   room_name: string;
   capacity: number;
+  cleaning_status?: string;
   days: { date: string; occupied: number; available: number; isFull: boolean }[];
 }
 
