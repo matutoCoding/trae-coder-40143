@@ -79,7 +79,11 @@ export function getRoomSchedule(startDate: string, endDate: string) {
 
 export function checkRoomAvailability(roomId: string, startDate: string, endDate: string, excludeBookingId?: string): boolean {
   const db = getDb();
-  let sql = `SELECT COUNT(*) as cnt FROM bookings
+  const room = db.prepare('SELECT capacity FROM rooms WHERE id = ?').get(roomId) as { capacity: number } | undefined;
+  if (!room) throw new Error('房间不存在');
+  const capacity = room.capacity;
+
+  let sql = `SELECT start_date, end_date FROM bookings
              WHERE room_id = ?
                AND status IN ('pending', 'checked_in')
                AND start_date <= ?
@@ -89,6 +93,38 @@ export function checkRoomAvailability(roomId: string, startDate: string, endDate
     sql += ' AND id != ?';
     params.push(excludeBookingId);
   }
-  const result = db.prepare(sql).get(...params) as any;
-  return result.cnt === 0;
+  const overlapping = db.prepare(sql).all(...params) as { start_date: string; end_date: string }[];
+
+  let current = dayjs(startDate);
+  const end = dayjs(endDate);
+  while (current.isBefore(end) || current.isSame(end, 'day')) {
+    const dateStr = current.format('YYYY-MM-DD');
+    const countOnDay = overlapping.filter(
+      (b) => b.start_date <= dateStr && b.end_date >= dateStr
+    ).length;
+    if (countOnDay >= capacity) {
+      return false;
+    }
+    current = current.add(1, 'day');
+  }
+
+  return true;
+}
+
+export function getRoomAvailableSlots(roomId: string, date: string): number {
+  const db = getDb();
+  const room = db.prepare('SELECT capacity FROM rooms WHERE id = ?').get(roomId) as { capacity: number } | undefined;
+  if (!room) return 0;
+
+  const result = db
+    .prepare(
+      `SELECT COUNT(*) as cnt FROM bookings
+       WHERE room_id = ?
+         AND status IN ('pending', 'checked_in')
+         AND start_date <= ?
+         AND end_date >= ?`
+    )
+    .get(roomId, date, date) as any;
+
+  return Math.max(0, room.capacity - (result.cnt || 0));
 }

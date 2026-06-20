@@ -2,7 +2,7 @@ import { getDb } from '../db';
 import { v4 as uuidv4 } from 'uuid';
 import dayjs from 'dayjs';
 import { checkRoomAvailability } from './rooms';
-import { consumeQuota, refundQuota, getFamilyQuota } from './families';
+import { getFamilyQuota, recordQuotaChange } from './families';
 import { promoteFromWaitlist } from './waitlist';
 
 export type BookingStatus = 'pending' | 'checked_in' | 'checked_out' | 'cancelled' | 'expired';
@@ -69,9 +69,13 @@ export function createBooking(data: {
   operator?: string;
 }): Booking {
   const db = getDb();
-  const tx = db.transaction(() => {
+  const alreadyInTx = db.inTransaction;
+  if (!alreadyInTx) {
+    db.exec('BEGIN IMMEDIATE');
+  }
+  try {
     if (!checkRoomAvailability(data.room_id, data.start_date, data.end_date)) {
-      throw new Error('该房间在所选日期已被预订');
+      throw new Error('该房间在所选日期已满，请选择其他日期或加入候补队列');
     }
 
     const days = calculateDays(data.start_date, data.end_date);
@@ -83,7 +87,7 @@ export function createBooking(data: {
     const room = db.prepare('SELECT price_per_day FROM rooms WHERE id = ?').get(data.room_id) as any;
     const totalAmount = (room?.price_per_day || 0) * days;
     const id = uuidv4();
-    const deadline = dayjs(data.start_date).subtract(2, 'hour').format('YYYY-MM-DD HH:mm:ss');
+    const deadline = `${data.start_date} 23:59:59`;
     const now = dayjs().format('YYYY-MM-DD HH:mm:ss');
 
     db.prepare(
@@ -103,11 +107,18 @@ export function createBooking(data: {
       now
     );
 
-    consumeQuota(data.family_id, days, id, data.operator);
+    recordQuotaChange(data.family_id, -days, '预订寄养扣减额度', id);
 
+    if (!alreadyInTx) {
+      db.exec('COMMIT');
+    }
     return db.prepare('SELECT * FROM bookings WHERE id = ?').get(id) as Booking;
-  });
-  return tx();
+  } catch (e) {
+    if (!alreadyInTx) {
+      try { db.exec('ROLLBACK'); } catch (_) { /* ignore */ }
+    }
+    throw e;
+  }
 }
 
 export function checkinBooking(bookingId: string): Booking {
@@ -135,6 +146,7 @@ export function checkoutBooking(bookingId: string): Booking {
     if (!booking) throw new Error('预订不存在');
     if (booking.status !== 'checked_in') throw new Error(`当前状态 ${booking.status} 无法办理退房`);
 
+    const days = calculateDays(booking.start_date, booking.end_date);
     const now = dayjs().format('YYYY-MM-DD HH:mm:ss');
     db.prepare("UPDATE bookings SET status = 'checked_out', checkout_time = ?, updated_at = ? WHERE id = ?").run(
       now,
@@ -142,6 +154,7 @@ export function checkoutBooking(bookingId: string): Booking {
       bookingId
     );
 
+    recordQuotaChange(booking.family_id, days, '退房释放额度', bookingId);
     promoteFromWaitlist(booking.room_id, booking.start_date, booking.end_date);
 
     return db.prepare('SELECT * FROM bookings WHERE id = ?').get(bookingId) as Booking;
@@ -159,10 +172,6 @@ export function cancelBooking(bookingId: string, reason?: string): Booking {
     }
 
     const days = calculateDays(booking.start_date, booking.end_date);
-    if (booking.status === 'pending') {
-      refundQuota(booking.family_id, days, bookingId, reason);
-    }
-
     const now = dayjs().format('YYYY-MM-DD HH:mm:ss');
     db.prepare("UPDATE bookings SET status = 'cancelled', notes = COALESCE(?, notes), updated_at = ? WHERE id = ?").run(
       reason || null,
@@ -170,6 +179,7 @@ export function cancelBooking(bookingId: string, reason?: string): Booking {
       bookingId
     );
 
+    recordQuotaChange(booking.family_id, days, reason || '取消预订退还额度', bookingId);
     promoteFromWaitlist(booking.room_id, booking.start_date, booking.end_date);
 
     return db.prepare('SELECT * FROM bookings WHERE id = ?').get(bookingId) as Booking;
@@ -185,11 +195,10 @@ export function expireBooking(bookingId: string): Booking {
     if (booking.status !== 'pending') throw new Error(`当前状态 ${booking.status} 无法过期释放`);
 
     const days = calculateDays(booking.start_date, booking.end_date);
-    refundQuota(booking.family_id, days, bookingId, '超时自动释放');
-
     const now = dayjs().format('YYYY-MM-DD HH:mm:ss');
     db.prepare("UPDATE bookings SET status = 'expired', updated_at = ? WHERE id = ?").run(now, bookingId);
 
+    recordQuotaChange(booking.family_id, days, '超时自动释放退还额度', bookingId);
     promoteFromWaitlist(booking.room_id, booking.start_date, booking.end_date);
     createNotification('booking_expired', '预订超时释放', `预订 ${bookingId} 已超时自动释放，候补用户将收到通知`, bookingId);
 

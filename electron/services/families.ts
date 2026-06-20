@@ -24,24 +24,33 @@ export interface QuotaTransaction {
   created_at: string;
 }
 
-let quotaLocks = new Map<string, Promise<any>>();
+function calculateDaysFromBookings(db: any, familyId: string): number {
+  const result = db
+    .prepare(
+      `SELECT COALESCE(SUM(
+        CASE
+          WHEN start_date = end_date THEN 1
+          ELSE CAST(julianday(end_date) - julianday(start_date) AS INTEGER) + 1
+        END
+      ), 0) as total_days
+       FROM bookings WHERE family_id = ? AND status IN ('pending', 'checked_in')`
+    )
+    .get(familyId) as any;
+  return result.total_days || 0;
+}
 
-async function withFamilyLock<T>(familyId: string, fn: () => T): Promise<T> {
-  const existingLock = quotaLocks.get(familyId);
-  if (existingLock) {
-    await existingLock;
+export function getFamilyQuota(familyId: string): { quota_pool: number; used_quota: number; available_quota: number } {
+  const db = getDb();
+  const family = db.prepare('SELECT quota_pool FROM families WHERE id = ?').get(familyId) as Family | undefined;
+  if (!family) {
+    throw new Error('家庭不存在');
   }
-  let resolveLock: (value: any) => void;
-  const lockPromise = new Promise<any>((resolve) => {
-    resolveLock = resolve;
-  });
-  quotaLocks.set(familyId, lockPromise);
-  try {
-    return fn();
-  } finally {
-    quotaLocks.delete(familyId);
-    resolveLock!(null);
-  }
+  const usedQuota = calculateDaysFromBookings(db, familyId);
+  return {
+    quota_pool: family.quota_pool,
+    used_quota: usedQuota,
+    available_quota: Math.max(0, family.quota_pool - usedQuota),
+  };
 }
 
 export function listFamilies(): Family[] {
@@ -78,68 +87,41 @@ export function updateFamily(id: string, data: Partial<Family>): Family {
   return db.prepare('SELECT * FROM families WHERE id = ?').get(id) as Family;
 }
 
-export function getFamilyQuota(familyId: string): { quota_pool: number; used_quota: number; available_quota: number } {
+export function adjustFamilyQuota(familyId: string, amount: number, reason: string, operator?: string) {
   const db = getDb();
-  const family = db.prepare('SELECT quota_pool FROM families WHERE id = ?').get(familyId) as Family | undefined;
-  if (!family) {
-    throw new Error('家庭不存在');
+  const family = db.prepare('SELECT * FROM families WHERE id = ?').get(familyId) as Family | undefined;
+  if (!family) throw new Error('家庭不存在');
+
+  const newTotal = family.quota_pool + amount;
+  if (newTotal < 0) throw new Error('总额度不能为负数');
+
+  const usedQuota = calculateDaysFromBookings(db, familyId);
+  const newAvailable = newTotal - usedQuota;
+  if (newAvailable < 0) {
+    throw new Error(`调整后可用额度将为负数（已使用 ${usedQuota} 天），请先取消部分预订或增加更多额度`);
   }
-  const used = db
-    .prepare(
-      `SELECT COALESCE(SUM(CAST(julianday(end_date) - julianday(start_date) AS INTEGER)), 0) as total_days
-       FROM bookings WHERE family_id = ? AND status IN ('pending', 'checked_in')`
-    )
-    .get(familyId) as any;
-  const usedQuota = used.total_days || 0;
-  return {
-    quota_pool: family.quota_pool,
-    used_quota: usedQuota,
-    available_quota: Math.max(0, family.quota_pool - usedQuota),
-  };
+
+  const now = dayjs().format('YYYY-MM-DD HH:mm:ss');
+  db.prepare('UPDATE families SET quota_pool = ?, updated_at = ? WHERE id = ?').run(newTotal, now, familyId);
+
+  const txId = uuidv4();
+  db.prepare(
+    `INSERT INTO quota_transactions (id, family_id, change_amount, balance_after, reason, operator, related_booking_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(txId, familyId, amount, newAvailable, reason || '管理员调整总额度', operator || null, null, now);
+
+  return { quota_pool: newTotal, available_quota: newAvailable, transaction_id: txId };
 }
 
-export function adjustFamilyQuota(familyId: string, amount: number, reason: string, operator?: string, relatedBookingId?: string) {
-  return withFamilyLock(familyId, () => {
-    const db = getDb();
-    const tx = db.transaction(() => {
-      const family = db.prepare('SELECT * FROM families WHERE id = ?').get(familyId) as Family | undefined;
-      if (!family) {
-        throw new Error('家庭不存在');
-      }
-      const newBalance = family.quota_pool + amount;
-      if (newBalance < 0) {
-        throw new Error('额度不足');
-      }
-      const now = dayjs().format('YYYY-MM-DD HH:mm:ss');
-      db.prepare('UPDATE families SET quota_pool = ?, updated_at = ? WHERE id = ?').run(newBalance, now, familyId);
-
-      const txId = uuidv4();
-      db.prepare(
-        `INSERT INTO quota_transactions (id, family_id, change_amount, balance_after, reason, operator, related_booking_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(txId, familyId, amount, newBalance, reason || null, operator || null, relatedBookingId || null, now);
-
-      return {
-        quota_pool: newBalance,
-        transaction_id: txId,
-      };
-    });
-    return tx();
-  });
-}
-
-export function consumeQuota(familyId: string, amount: number, relatedBookingId: string, operator?: string) {
-  if (amount <= 0) {
-    throw new Error('扣减额度必须大于0');
-  }
-  return adjustFamilyQuota(familyId, -amount, '预订寄养扣减额度', operator, relatedBookingId);
-}
-
-export function refundQuota(familyId: string, amount: number, relatedBookingId: string, operator?: string) {
-  if (amount <= 0) {
-    throw new Error('退还额度必须大于0');
-  }
-  return adjustFamilyQuota(familyId, amount, '取消预订退还额度', operator, relatedBookingId);
+export function recordQuotaChange(familyId: string, changeAmount: number, reason: string, relatedBookingId?: string) {
+  const db = getDb();
+  const quota = getFamilyQuota(familyId);
+  const txId = uuidv4();
+  const now = dayjs().format('YYYY-MM-DD HH:mm:ss');
+  db.prepare(
+    `INSERT INTO quota_transactions (id, family_id, change_amount, balance_after, reason, operator, related_booking_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(txId, familyId, changeAmount, quota.available_quota, reason, null, relatedBookingId || null, now);
 }
 
 export function getQuotaHistory(familyId: string): QuotaTransaction[] {

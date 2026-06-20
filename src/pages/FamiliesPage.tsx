@@ -187,7 +187,7 @@ function FamiliesPage() {
     { title: '电话', dataIndex: 'phone', key: 'phone', width: 130 },
     { title: '地址', dataIndex: 'address', key: 'address', ellipsis: true },
     {
-      title: '共享额度池',
+      title: '总额度',
       dataIndex: 'quota_pool',
       key: 'quota_pool',
       width: 120,
@@ -348,20 +348,23 @@ function FamiliesPage() {
               <Col span={12}>
                 <Descriptions column={1} size="small">
                   <Descriptions.Item label="总额度">{quotaInfo.quota_pool} 天</Descriptions.Item>
-                  <Descriptions.Item label="已使用">{quotaInfo.used_quota} 天</Descriptions.Item>
+                  <Descriptions.Item label="已使用（活跃预订）">{quotaInfo.used_quota} 天</Descriptions.Item>
                   <Descriptions.Item label="可用余额" style={{ color: '#52c41a' }}>
                     <strong>{quotaInfo.available_quota} 天</strong>
                   </Descriptions.Item>
                 </Descriptions>
-                <Space style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 11, color: '#8c8c8c', marginBottom: 8 }}>
+                  以下按钮调整总额度，可用余额 = 总额度 - 已使用
+                </div>
+                <Space style={{ marginTop: 4 }}>
                   <Button icon={<PlusCircleOutlined />} type="primary" onClick={() => handleAdjustQuota(5)}>
-                    +5天
+                    总额度+5
                   </Button>
                   <Button icon={<PlusCircleOutlined />} onClick={() => handleAdjustQuota(10)}>
-                    +10天
+                    总额度+10
                   </Button>
                   <Button icon={<MinusCircleOutlined />} danger onClick={() => handleAdjustQuota(-5)}>
-                    -5天
+                    总额度-5
                   </Button>
                 </Space>
               </Col>
@@ -380,7 +383,7 @@ function FamiliesPage() {
                   {t.change_amount > 0 ? '+' : ''}{t.change_amount} 天
                 </Tag>
                 <span>{t.reason}</span>
-                <span style={{ color: '#8c8c8c' }}>余额: {t.balance_after}</span>
+                <span style={{ color: '#8c8c8c' }}>可用: {t.balance_after}天</span>
                 <span style={{ color: '#bfbfbf', marginLeft: 'auto' }}>{t.created_at}</span>
               </Space>
             </List.Item>

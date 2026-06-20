@@ -12,7 +12,6 @@ import {
   Input,
   message,
   Space,
-  Tooltip,
   Popconfirm,
   Badge,
 } from 'antd';
@@ -120,7 +119,7 @@ function SchedulePage() {
         message.success('入住登记成功');
       } else if (actionType === 'checkout') {
         await window.api.bookings.checkout(actionBooking.id);
-        message.success('退房成功，候补队列已自动补位');
+        message.success('退房成功，额度已释放，候补队列已自动补位');
       } else {
         await window.api.bookings.cancel(actionBooking.id);
         message.success('取消成功，额度已退还，候补队列已自动补位');
@@ -158,6 +157,20 @@ function SchedulePage() {
     return <Space>{actions}</Space>;
   };
 
+  const getCapacityInfo = (room: any) => {
+    const cap = room.capacity || 1;
+    const used = room.bookings.length;
+    if (cap === 1) {
+      return used > 0
+        ? { text: '已占', color: '#ff4d4f' as const }
+        : { text: '空闲', color: '#52c41a' as const };
+    }
+    if (used >= cap) {
+      return { text: `${used}/${cap} 已满`, color: '#ff4d4f' as const };
+    }
+    return { text: `${used}/${cap} 已占`, color: used > 0 ? '#faad14' as const : '#52c41a' as const };
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -172,70 +185,87 @@ function SchedulePage() {
       </div>
 
       <Row gutter={[16, 16]}>
-        {rooms.map((room) => (
-          <Col xs={24} md={12} lg={8} xl={6} key={room.id}>
-            <Card
-              size="small"
-              title={
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span>
-                    {room.name}
-                    <Tag style={{ marginLeft: 8 }} color="blue">
-                      {ROOM_TYPE_LABELS[room.type] || room.type}
-                    </Tag>
-                  </span>
-                  <Badge count={room.bookings.length} showZero style={{ backgroundColor: room.bookings.length > 0 ? '#52c41a' : '#bfbfbf' }} />
-                </div>
-              }
-              extra={
-                room.status === 'active' ? (
-                  <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => handleOpenBooking(room)}>
-                    预订
-                  </Button>
-                ) : (
-                  <Tag color="default">停用</Tag>
-                )
-              }
-            >
-              <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 8 }}>
-                容纳 {room.capacity} 只 · ¥{room.price_per_day}/天
-                {room.description && <div>{room.description}</div>}
-              </div>
-              {room.bookings.length === 0 ? (
-                <div className="empty-tip" style={{ padding: '16px 0' }}>空闲中</div>
-              ) : (
-                <div>
-                  {room.bookings.map((b: Booking) => (
-                    <div
-                      key={b.id}
-                      className={`booking-tag ${b.status}`}
-                      style={{ display: 'block', marginBottom: 6 }}
-                      title={`${b.pet_name} · ${b.family_name}`}
+        {rooms.map((room) => {
+          const capInfo = getCapacityInfo(room);
+          const isFull = room.capacity > 1
+            ? room.bookings.length >= room.capacity
+            : room.bookings.length > 0;
+          return (
+            <Col xs={24} md={12} lg={8} xl={6} key={room.id}>
+              <Card
+                size="small"
+                title={
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>
+                      {room.name}
+                      <Tag style={{ marginLeft: 8 }} color="blue">
+                        {ROOM_TYPE_LABELS[room.type] || room.type}
+                      </Tag>
+                    </span>
+                    <Tag color={capInfo.color}>{capInfo.text}</Tag>
+                  </div>
+                }
+                extra={
+                  room.status === 'active' ? (
+                    <Button
+                      type="primary"
+                      size="small"
+                      icon={<PlusOutlined />}
+                      onClick={() => handleOpenBooking(room)}
+                      disabled={isFull}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span>
-                          🐾 {b.pet_name} · {b.family_name}
-                          <Tag color={BOOKING_STATUS_COLORS[b.status]} style={{ marginLeft: 6 }}>
-                            {BOOKING_STATUS_LABELS[b.status]}
-                          </Tag>
-                        </span>
-                      </div>
-                      <div style={{ fontSize: 11, marginTop: 4, color: '#595959' }}>
-                        {b.start_date} ~ {b.end_date}
-                        {b.status === 'pending' && (
-                          <span style={{ marginLeft: 8, color: '#d46b08' }}>
-                            ⏰ 截止 {dayjs(b.deadline).format('MM-DD HH:mm')}
-                          </span>
-                        )}
-                      </div>
-                      {renderActions(b)}
-                    </div>
-                  ))}
+                      {isFull ? '已满' : '预订'}
+                    </Button>
+                  ) : (
+                    <Tag color="default">停用</Tag>
+                  )
+                }
+              >
+                <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 8 }}>
+                  容纳 {room.capacity} 只 · ¥{room.price_per_day}/天
+                  {room.capacity > 1 && (
+                    <span style={{ marginLeft: 8 }}>
+                      （剩余 {Math.max(0, room.capacity - room.bookings.length)} 个位置）
+                    </span>
+                  )}
+                  {room.description && <div>{room.description}</div>}
                 </div>
-              )}
-            </Card>
-          </Col>
-        ))}
+                {room.bookings.length === 0 ? (
+                  <div className="empty-tip" style={{ padding: '16px 0' }}>空闲中</div>
+                ) : (
+                  <div>
+                    {room.bookings.map((b: Booking) => (
+                      <div
+                        key={b.id}
+                        className={`booking-tag ${b.status}`}
+                        style={{ display: 'block', marginBottom: 6 }}
+                        title={`${b.pet_name} · ${b.family_name}`}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span>
+                            🐾 {b.pet_name} · {b.family_name}
+                            <Tag color={BOOKING_STATUS_COLORS[b.status]} style={{ marginLeft: 6 }}>
+                              {BOOKING_STATUS_LABELS[b.status]}
+                            </Tag>
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11, marginTop: 4, color: '#595959' }}>
+                          {b.start_date} ~ {b.end_date}
+                          {b.status === 'pending' && (
+                            <span style={{ marginLeft: 8, color: '#d46b08' }}>
+                              ⏰ 截止 {dayjs(b.deadline).format('MM-DD HH:mm')}
+                            </span>
+                          )}
+                        </div>
+                        {renderActions(b)}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            </Col>
+          );
+        })}
       </Row>
 
       <Modal
@@ -310,7 +340,7 @@ function SchedulePage() {
           <p style={{ color: '#faad14' }}>取消后将自动退还共享额度并通知候补队列补位</p>
         )}
         {actionType === 'checkout' && (
-          <p style={{ color: '#52c41a' }}>退房后将自动通知候补队列补位</p>
+          <p style={{ color: '#52c41a' }}>退房后将释放额度并通知候补队列补位</p>
         )}
       </Modal>
     </div>
